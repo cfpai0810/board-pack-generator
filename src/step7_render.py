@@ -32,7 +32,7 @@ from __future__ import annotations
 import hashlib
 import io
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -48,14 +48,14 @@ from reportlab.platypus import (
 )
 
 from src.formatting import (
-    cash_pounds, margin_cell, pct, pts_cell, table_number, table_value,
+    cash_pounds, margin_cell, pct, pts_cell, table_number, table_value, when_text,
 )
 from src.state import Pack, PackStatus, SectionType
 from src.step5_narrate import TEMPLATE, clean_dashes
 from src.step6_review import _utc_now, signoff_summary, write_audit
 from src.tables import (
-    DRAFT_HEX, DRIVERS_HEADER, FINAL_HEX, LINE, MATERIAL_HEX, PNL_HEADER, RULE_HEX,
-    SUBTOTAL, drivers_rows, pnl_rows,
+    CASH_NOTE, DRAFT_HEX, DRIVERS_HEADER, DRIVERS_NOTE, FINAL_HEX, KPI_NOTE, LINE,
+    MATERIAL_HEX, PNL_HEADER, RULE_HEX, SUBTOTAL, drivers_rows, pnl_notes, pnl_rows,
 )
 
 # -- Look: colour only for status and materiality -----------------------------
@@ -98,22 +98,8 @@ def _para(text: str, style: ParagraphStyle = _BASE) -> Paragraph:
     return Paragraph(escape(_safe(text)).replace("\n", "<br/>"), style)
 
 
-def _when(iso: str) -> str:
-    dt = datetime.fromisoformat(iso).astimezone(timezone.utc)
-    return f"{dt.day} {dt:%B %Y} at {dt:%H:%M} UTC"
-
-
 def _short(sha: str) -> str:
     return sha[:12] if sha else "not recorded"
-
-
-def _titled(pack: Pack, note: str) -> str:
-    """A flag message with its section key ('exec_summary: ...') shown as the section title."""
-    for section in pack.sections:
-        prefix = f"{section.section_type.value}: "
-        if note.startswith(prefix):
-            return f"{section.title}: {note[len(prefix):]}"
-    return note
 
 
 # -- The P&L table ------------------------------------------------------------
@@ -181,8 +167,7 @@ def _drivers_block(pack: Pack) -> list:
         _para("Main drivers of the variance against budget", _H3),
         table,
         Spacer(1, 3),
-        _para("Computed from the P&L: each line's budget variance as its effect on "
-              "profit. The commentary does not attribute; this table does.", _SMALL),
+        _para(DRIVERS_NOTE, _SMALL),
     ])]
 
 
@@ -241,7 +226,7 @@ def _boxed(text: str) -> Table:
 
 def _banner(pack: Pack) -> Table:
     if pack.status is PackStatus.FINAL:
-        text = f"FINAL: signed off by {pack.sign_off_by} on {_when(pack.sign_off_at)}"
+        text = f"FINAL: signed off by {pack.sign_off_by} on {when_text(pack.sign_off_at)}"
         fill = FINAL_FILL
     else:
         text = "DRAFT: not signed off. Not for circulation as final."
@@ -267,7 +252,7 @@ def _governance(pack: Pack) -> list:
                    f"{', '.join(template_sections)}")
     edited = [s.title for s in pack.sections if s.edited]
     if pack.status is PackStatus.FINAL:
-        signed = f"Reviewed and signed off by {pack.sign_off_by} on {_when(pack.sign_off_at)}."
+        signed = f"Reviewed and signed off by {pack.sign_off_by} on {when_text(pack.sign_off_at)}."
     else:
         signed = "Not signed off."
     lines = [
@@ -312,21 +297,14 @@ def _story(pack: Pack) -> list:
         _para("Commentary on material lines", _H3),
         _para(pnl.narrative),
         Spacer(1, 6),
-        _para(f"* Material: a variance against budget of £{table_value(flags.materiality_abs)} "
-              f"or {pct(flags.materiality_pct)} or more. The percentage test is not applied "
-              f"across a change of sign. Material rows are shaded and marked *.", _SMALL),
-        _para("Figures are calculated before rounding, so totals and differences may not "
-              "add exactly.", _SMALL),
-        _para("Fav/(Adv): favourable variances are shown plain and adverse ones in "
-              "brackets; for costs an overspend is adverse. n/m: not meaningful, because "
-              "the comparator is zero or the sign changed.", _SMALL),
+        *[_para(note, _SMALL) for note in pnl_notes(pack)],
         # Each heading stays on the same page as its table: a header row
         # stranded at the foot of a page reads as a table with no data.
         KeepTogether([
             _para("Key performance indicators", _H2),
             _kpi_table(pack),
             Spacer(1, 4),
-            _para("For gross margin the target is the budget margin.", _SMALL),
+            _para(KPI_NOTE, _SMALL),
         ]),
         Spacer(1, 6),
         _para(kpis.narrative),
@@ -337,8 +315,7 @@ def _story(pack: Pack) -> list:
                 _para("Cash", _H2),
                 _cash_table(cash.figures),
                 Spacer(1, 4),
-                _para("Converted to pounds from the KPI file, which states cash in "
-                      "thousands.", _SMALL),
+                _para(CASH_NOTE, _SMALL),
             ]),
             Spacer(1, 6),
             _para(cash.narrative),
@@ -354,7 +331,7 @@ def _story(pack: Pack) -> list:
         story += [PageBreak(), _para("Review notes", _H2),
                   _para("Outstanding when this draft was rendered. The pack is a draft "
                         "until these are reviewed and it is signed off.")]
-        story += ([_para(f"{i}. {_titled(pack, note)}") for i, note in enumerate(notes, start=1)]
+        story += ([_para(f"{i}. {note}") for i, note in enumerate(notes, start=1)]
                   or [_para("No outstanding flags or warnings.")])
     return story
 
@@ -408,7 +385,7 @@ class _NumberedCanvas(Canvas):
 
 def _render_pdf(pack: Pack) -> bytes:
     final = pack.status is PackStatus.FINAL
-    generated = _when(pack.sign_off_at if final else _utc_now())
+    generated = when_text(pack.sign_off_at if final else _utc_now())
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,

@@ -35,7 +35,9 @@ from pathlib import Path
 from typing import Optional, TextIO
 
 from config import KPIS_PATH, NARRATIVE_MODEL, OUTPUT_DIR, PNL_PATH, ROOT
-from src.pipeline import PipelineError, PipelineResult, run_pipeline
+from src.pipeline import (
+    SIGN_WORD, PipelineError, PipelineResult, is_sign_word, run_pipeline,
+)
 from src.state import PackStatus
 
 ENV_FILE = ROOT / ".env"
@@ -115,9 +117,9 @@ class TerminalReviewer:
         else:
             self._say("Nothing is outstanding.")
         answer = self._read(
-            f"Type SIGN to sign off this pack as {self.name}, or press Enter to "
+            f"Type {SIGN_WORD} to sign off this pack as {self.name}, or press Enter to "
             f"leave it as a DRAFT: ")
-        return answer is not None and answer.strip() == "SIGN"
+        return is_sign_word(answer)          # the one SIGN rule, shared with the web
 
 
 # -- The model client, only when asked for ------------------------------------------

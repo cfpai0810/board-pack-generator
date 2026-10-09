@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.formatting import (
-    fav_adv, fav_adv_pct, margin_cell, pts_cell, table_value,
+    fav_adv, fav_adv_pct, margin_cell, pct, pts_cell, table_value,
 )
 from src.state import SUBTOTALS, Category, Pack, SectionType, subtotal_key
 
@@ -120,6 +120,24 @@ def pnl_rows(pack: Pack) -> list[PnlRow]:
     return rows
 
 
+def pnl_notes(pack: Pack) -> list[str]:
+    """
+    The notes that go under the P&L table, wherever it is drawn: the
+    materiality key, the rounding note and the Fav/(Adv) key. The PDF and the
+    web page both read them here, so neither can drop one.
+    """
+    flags = pack.material_flags
+    return [
+        f"* Material: a variance against budget of £{table_value(flags.materiality_abs)} "
+        f"or {pct(flags.materiality_pct)} or more. The percentage test is not applied "
+        f"across a change of sign. Material rows are shaded and marked *.",
+        "Figures are calculated before rounding, so totals and differences may not add exactly.",
+        "Fav/(Adv): favourable variances are shown plain and adverse ones in brackets; for "
+        "costs an overspend is adverse. n/m: not meaningful, because the comparator is zero "
+        "or the sign changed.",
+    ]
+
+
 # -- The drivers table ------------------------------------------------------------
 
 DRIVERS_HEADER = (("Subtotal", "Line", "Impact on profit"), ("", "", "Fav/(Adv) £"))
@@ -127,6 +145,14 @@ DRIVERS_HEADER = (("Subtotal", "Line", "Impact on profit"), ("", "", "Fav/(Adv) 
 # Subtotals whose drivers are tabulated: the ones that span categories, so
 # the table says which side of the P&L moved them.
 ATTRIBUTED = (subtotal_key("gross_profit"), subtotal_key("ebit"))
+
+
+DRIVERS_NOTE = ("Computed from the P&L: each line's budget variance as its effect on "
+                "profit. The commentary does not attribute; this table does.")
+
+KPI_NOTE = "For gross margin the target is the budget margin."
+
+CASH_NOTE = "Converted to pounds from the KPI file, which states cash in thousands."
 
 
 @dataclass(frozen=True)

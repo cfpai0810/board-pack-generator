@@ -47,7 +47,7 @@ from config import (
 )
 from src.formatting import sign_change
 from src.state import (
-    SUBTOTALS, Category, Kpi, MaterialFlags, Pack, PackStatus, PnlLine,
+    SECTION_TITLES, SUBTOTALS, Category, Kpi, MaterialFlags, Pack, PackStatus, PnlLine,
     Section, SectionType, Subtotals, line_key, subtotal_key,
 )
 
@@ -254,7 +254,7 @@ def _exec_summary_section(
     ] + [_line_figures(line) for line in exec_lines]
     return Section(
         section_type=SectionType.EXEC_SUMMARY,
-        title="Executive summary",
+        title=SECTION_TITLES[SectionType.EXEC_SUMMARY.value],
         figures={
             "items": items,
             "drivers": {
@@ -277,7 +277,7 @@ def _pnl_section(
 ) -> Section:
     return Section(
         section_type=SectionType.PNL,
-        title="Profit and loss",
+        title=SECTION_TITLES[SectionType.PNL.value],
         figures={
             "lines": [_line_figures(line) for line in pnl_lines],
             "subtotals": [
@@ -297,7 +297,7 @@ def _kpis_section(kpis: list[Kpi]) -> Section:
     """
     return Section(
         section_type=SectionType.KPIS,
-        title="Key performance indicators",
+        title=SECTION_TITLES[SectionType.KPIS.value],
         figures={"kpis": [_kpi_figures(k) for k in kpis
                           if not k.is_metric(CASH_KPI_METRIC)]},
     )
@@ -321,7 +321,7 @@ def _cash_section(kpis: list[Kpi], problems: list[str]) -> Section:
         figures = {"supplied": True, **_kpi_figures(cash)}
     return Section(
         section_type=SectionType.CASH,
-        title="Cash balance",
+        title=SECTION_TITLES[SectionType.CASH.value],
         figures=figures,
     )
 

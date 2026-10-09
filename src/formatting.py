@@ -20,6 +20,7 @@ only here at display. Every helper takes a Decimal and returns a string.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
 from config import CASH_KPI_SCALE
@@ -127,6 +128,14 @@ def number(value: Decimal) -> str:
     if magnitude == magnitude.to_integral_value():
         return f"{_round(magnitude, 0):,}"
     return f"{_round(magnitude, 1):,}"
+
+
+# -- Dates ----------------------------------------------------------------------
+
+def when_text(iso: str) -> str:
+    """A UTC timestamp as a person reads it: '9 October 2026 at 08:04 UTC'. The PDF and the screen both use it."""
+    dt = datetime.fromisoformat(iso).astimezone(timezone.utc)
+    return f"{dt.day} {dt:%B %Y} at {dt:%H:%M} UTC"
 
 
 # -- Direction words ----------------------------------------------------------

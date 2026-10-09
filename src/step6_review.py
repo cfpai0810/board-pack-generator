@@ -49,6 +49,7 @@ changed by a new run, not by editing.
 
 from __future__ import annotations
 
+import copy
 import json
 import subprocess
 import uuid
@@ -75,6 +76,47 @@ Confirm = Callable[[list[str]], bool]
 
 class AlreadySignedOff(ValueError):
     """review() was called on a FINAL pack."""
+
+
+# -- The sign-off rule, shared by the terminal and the web ------------------------
+
+SIGN_WORD = "SIGN"
+NAME_WARNING = "review: sign-off needs a reviewer name, so the pack stays DRAFT"
+SIGN_WARNING = "review: sign-off needs the word SIGN typed exactly, so the pack stays DRAFT"
+SIGN_OFF_WARNINGS = (NAME_WARNING, SIGN_WARNING)
+
+
+def is_sign_word(text: Optional[str]) -> bool:
+    """The one SIGN rule: the word SIGN exactly (spaces around it ignored). 'sign' is not SIGN."""
+    return text is not None and text.strip() == SIGN_WORD
+
+
+def confirm_by_word(pack: Pack, word: Optional[str]) -> Confirm:
+    """
+    A confirm for a screen where the reviewer types the word. True only for
+    exactly SIGN. Any other word (blank included) means a sign-off was
+    attempted and refused, so the engine records SIGN_WARNING in the pack
+    and in this run's audit line. None means the reviewer chose to save a
+    draft: never True, and no warning.
+    """
+    def confirm(summary: list[str]) -> bool:
+        if word is None:
+            return False
+        if is_sign_word(word):
+            return True
+        pack.warnings.append(SIGN_WARNING)
+        return False
+    return confirm
+
+
+def answers_ask(pack: Pack, answers: dict[str, str]) -> Ask:
+    """
+    An ask that returns the text already edited on a screen for each section
+    (keyed by section: "exec_summary", "pnl", "kpis", "cash"), or the current
+    text for a section with no answer.
+    """
+    keys = {section.title: section.section_type.value for section in pack.sections}
+    return lambda title, text, warnings: answers.get(keys[title], text)
 
 
 def _utc_now() -> str:
@@ -221,6 +263,7 @@ def signoff_summary(pack: Pack) -> list[str]:
 def _flag_record(flag: Flag) -> dict:
     return {
         "section": flag.section,
+        "kind": flag.kind,
         "text": flag.text,
         "raised_on": flag.raised_on,
         "resolved": flag.resolved,
@@ -346,6 +389,7 @@ def review(
     confirm: Confirm,
     reviewer: str,
     output_dir: Path,
+    sign: bool = True,
 ) -> Pack:
     """
     Run the review: ask about each section, recheck edits, summarise what
@@ -353,10 +397,39 @@ def review(
 
     Raises AlreadySignedOff on a FINAL pack. A blank reviewer cannot sign:
     confirm is not asked, a warning is added and the pack stays DRAFT.
+    sign=False records the review without attempting sign-off (a screen's
+    "Save as draft"): confirm is never asked and no sign-off warning is
+    added, because nobody tried to sign.
     """
     run_at = _start_run(pack)
-    figures = comparison_set(pack)
+    _clear_sign_off_warnings(pack)
+    _apply_answers(pack, ask, comparison_set(pack))
 
+    name = (reviewer or "").strip()
+    if not sign:
+        pass
+    elif not name:
+        pack.warnings.append(NAME_WARNING)
+    else:
+        summary = signoff_summary(pack)
+        if confirm(summary):
+            pack.status = PackStatus.FINAL
+            pack.sign_off_by = name
+            pack.sign_off_at = _utc_now()
+            pack.acknowledged = summary
+
+    record = audit_record(pack, run_id=pack.run_id, timestamp=run_at, reviewer=name)
+    write_audit(record, output_dir)
+    return pack
+
+
+def _apply_answers(pack: Pack, ask: Ask, figures: dict) -> None:
+    """
+    Ask about each section in order, keep each final text, recheck what was
+    edited, record the edits, and check every section for unprintable
+    characters. Shared by review() and preview_signoff(), so the summary a
+    screen shows is built by the same code that review() uses.
+    """
     for section in pack.sections:
         current = section.narrative
         key = section.section_type.value
@@ -372,21 +445,46 @@ def review(
     }
     check_glyphs(pack)
 
-    name = (reviewer or "").strip()
-    if not name:
-        pack.warnings.append(
-            "review: sign-off needs a reviewer name, so the pack stays DRAFT")
-    else:
-        summary = signoff_summary(pack)
-        if confirm(summary):
-            pack.status = PackStatus.FINAL
-            pack.sign_off_by = name
-            pack.sign_off_at = _utc_now()
-            pack.acknowledged = summary
 
-    record = audit_record(pack, run_id=pack.run_id, timestamp=run_at, reviewer=name)
-    write_audit(record, output_dir)
-    return pack
+def _clear_sign_off_warnings(pack: Pack) -> None:
+    """
+    The two sign-off warnings describe one attempt, so each run starts
+    without them; otherwise a refused attempt on a web pack would still be
+    listed when the reviewer tries again. The audit line of the refused
+    attempt keeps its warning.
+    """
+    for warning in SIGN_OFF_WARNINGS:
+        while warning in pack.warnings:
+            pack.warnings.remove(warning)
+
+
+def preview_signoff(pack: Pack, answers: dict[str, str]) -> list[str]:
+    """
+    The sign-off summary review() would pass to confirm if these texts were
+    submitted now. Runs the same steps on a copy, so the pack itself is
+    unchanged and no audit line is written.
+    """
+    trial = copy.deepcopy(pack)
+    _clear_sign_off_warnings(trial)
+    for section in trial.sections:
+        if not section.draft:
+            section.draft = section.narrative
+    _apply_answers(trial, answers_ask(trial, answers), comparison_set(trial))
+    return signoff_summary(trial)
+
+
+def audit_text(output_dir: Path, run_id: Optional[str] = None) -> str:
+    """
+    The audit log's lines as JSONL text, all of them or only those of one
+    run (its review and rendered lines). Empty when there is no log yet.
+    """
+    path = Path(output_dir) / AUDIT_FILE
+    if not path.is_file():
+        return ""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if run_id is not None:
+        lines = [line for line in lines if json.loads(line).get("run_id") == run_id]
+    return "".join(line + "\n" for line in lines)
 
 
 def _start_run(pack: Pack) -> str:

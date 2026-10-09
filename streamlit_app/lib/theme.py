@@ -1,7 +1,8 @@
 # =============================================================================
 # lib/theme.py: one visual identity, shared with the PDF
 # =============================================================================
-# The status and materiality colours are the PDF's own (src/tables.py), so
+# The status and materiality colours are the PDF's own (src/tables.py, via
+# src.pipeline), so
 # the screen and the signed pack read as one product: amber for DRAFT, green
 # for FINAL, the pale shading for material rows. Colour carries status and
 # materiality only; numbers are never coloured (the P5 restraint).
@@ -10,11 +11,11 @@
 # body, UI and data, with tabular figures so numbers align in tables.
 # =============================================================================
 
-from src.tables import DRAFT_HEX, FINAL_HEX, MATERIAL_HEX, RULE_HEX
+from src.pipeline import DRAFT_HEX, FINAL_HEX, MATERIAL_HEX, RULE_HEX
 
 INK = "#1E2A2E"
-HEADER_BAND = "#23332B"
-HEADER_SUB = "#C3D6CA"
+HEADER_BAND = "#272C30"
+HEADER_SUB = "#CDD2D6"
 MUTED = "#6A7378"
 RULE = RULE_HEX
 SOFT_RULE = "#D5D9DB"
@@ -78,7 +79,7 @@ def inject_css() -> str:
       /* Narrative block */
       .bp-narrative {{
         background: {NEAR_WHITE};
-        border-left: 3px solid {FINAL};
+        border-left: 3px solid {RULE};
         border-radius: 4px;
         padding: 14px 18px;
         margin: 8px 0 14px;
@@ -110,6 +111,8 @@ def inject_css() -> str:
       table.bp-table tr.margin td {{ border-top: 1px solid {RULE}; border-bottom: 1px solid {RULE}; }}
       table.bp-table tr.material td {{ background: {MATERIAL}; }}
       .bp-note {{ font-size: 0.76rem; color: {MUTED}; margin: 2px 0; }}
+      ul.bp-flags {{ margin: 0 0 14px; padding-left: 1.1em; font-size: 0.82rem; color: {INK}; }}
+      ul.bp-flags li {{ margin: 2px 0; }}
 
       /* Controls in ink, not Streamlit's default red: colour is kept for
          status and materiality only */
@@ -122,6 +125,8 @@ def inject_css() -> str:
       [data-testid="stTab"][aria-selected="true"],
       [data-testid="stTab"][aria-selected="true"] p {{ color: {INK}; font-weight: 600; }}
       [data-testid="stTab"]:hover, [data-testid="stTab"]:hover p {{ color: {INK}; }}
+      [data-testid="stTextInputRootElement"]:focus-within,
+      [data-testid="stTextAreaRootElement"]:focus-within {{ border-color: {INK} !important; }}
       [data-testid="stTab"] .react-aria-SelectionIndicator {{
         background-color: {INK} !important; border-color: {INK} !important;
       }}

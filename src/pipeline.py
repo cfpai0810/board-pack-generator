@@ -13,28 +13,61 @@ prevent. So signing only happens through the injected ask and confirm; the
 draft-only path writes a DRAFT with its review notes and audit line, and
 there is deliberately no option that signs without them.
 
-All the logic lives here so the CLI (main.py) and the future web layer call
-the same engine with their own ask and confirm. Nothing here reads input or
+All the logic lives here so the CLI (main.py) and the web layer call the
+same engine with their own ask and confirm. Nothing here reads input or
 prints. A problem the user can fix (a missing file, a P&L with nothing
 loadable) raises PipelineError with a plain message.
+
+This module is also the ONE public surface of src/ for the web layer:
+streamlit_app/ imports nothing else from src/. Besides run_pipeline it
+offers the review stage as thin wrappers over the step code
+(review_and_save, signoff_summary, check_text, audit_text), and re-exports
+the display rows, palette and types a page needs. __all__ lists it all.
 """
 
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
-from src.state import Pack
+from src.formatting import when_text
+from src.state import (
+    DRAFT_TEXT, GLYPH, NUMERIC, REVIEWER_TEXT, SECTION_TITLES, Flag, Pack, PackStatus,
+    SectionType,
+)
 from src.step1_load import load
 from src.step2_validate import validate
 from src.step3_compute import compute
 from src.step4_assemble import assemble
 from src.step5_narrate import narrate
-from src.step6_review import AUDIT_FILE, Ask, Confirm, record_draft, review
+from src.step6_review import (
+    AUDIT_FILE, NAME_WARNING, SIGN_OFF_WARNINGS, SIGN_WARNING, SIGN_WORD, Ask,
+    Confirm, _utc_now, answers_ask, audit_text, check_text, confirm_by_word,
+    is_sign_word, preview_signoff, record_draft, review,
+)
 from src.step7_render import save_pack
+from src.tables import (
+    DRAFT_HEX, DRIVERS_HEADER, DRIVERS_NOTE, FINAL_HEX, MATERIAL_HEX, PNL_HEADER,
+    RULE_HEX, DriverRow, PnlRow, drivers_rows, pnl_notes, pnl_rows,
+)
+
+__all__ = [
+    # the run
+    "run_pipeline", "PipelineError", "PipelineResult",
+    # the review stage
+    "review_and_save", "signoff_summary", "check_text", "audit_text",
+    "is_sign_word", "SIGN_WORD", "NAME_WARNING", "SIGN_WARNING",
+    # what a page displays
+    "pnl_rows", "drivers_rows", "PnlRow", "DriverRow", "PNL_HEADER", "DRIVERS_HEADER",
+    "pnl_notes", "DRIVERS_NOTE", "when_text", "SECTION_TITLES",
+    "DRAFT_HEX", "FINAL_HEX", "MATERIAL_HEX", "RULE_HEX",
+    # types and constants
+    "Pack", "PackStatus", "SectionType", "Flag", "NUMERIC", "GLYPH",
+    "DRAFT_TEXT", "REVIEWER_TEXT",
+]
 
 
 class PipelineError(Exception):
@@ -43,9 +76,16 @@ class PipelineError(Exception):
 
 @dataclass
 class PipelineResult:
+    """
+    notices holds the engine's sign-off warnings from a review attempt
+    (a blank name, a word other than SIGN), for a screen to show. saved_at
+    is the UTC time the PDF was saved.
+    """
     pack: Pack
     pdf_path: Path
     audit_path: Path
+    notices: list[str] = field(default_factory=list)
+    saved_at: str = ""
 
 
 def run_pipeline(
@@ -106,5 +146,47 @@ def run_pipeline(
     else:
         review(pack, ask=ask, confirm=confirm, reviewer=reviewer, output_dir=output_dir)
 
+    saved_at = _utc_now()
     pdf_path = save_pack(pack, output_dir)
-    return PipelineResult(pack=pack, pdf_path=pdf_path, audit_path=output_dir / AUDIT_FILE)
+    return PipelineResult(pack=pack, pdf_path=pdf_path, audit_path=output_dir / AUDIT_FILE,
+                          saved_at=saved_at)
+
+
+# -- The review stage, for a screen with edit boxes ---------------------------------
+
+def signoff_summary(pack: Pack, edits: dict[str, str]) -> list[str]:
+    """
+    What the reviewer must see before signing, if the texts on screen were
+    submitted now: the same lines the CLI prints before SIGN, built by the
+    same code review() uses, on a copy of the pack. edits maps each section
+    key ("exec_summary", "pnl", "kpis", "cash") to its text.
+    """
+    return preview_signoff(pack, edits)
+
+
+def review_and_save(
+    pack: Pack,
+    output_dir: Path,
+    *,
+    edits: dict[str, str],
+    reviewer: str = "",
+    sign_word: Optional[str] = None,
+) -> PipelineResult:
+    """
+    Review the pack with the texts already edited on screen, then render
+    and save it: one review line and one rendered line in the audit.
+
+    sign_word=None is "Save as draft": the edits are kept and the pack stays
+    DRAFT. Otherwise the engine decides: the pack is signed only with a
+    reviewer name and sign_word exactly SIGN; a blank name or any other
+    word leaves it DRAFT with the engine's warning in notices. A FINAL pack
+    raises AlreadySignedOff: a signed pack is changed by a new run.
+    """
+    output_dir = Path(output_dir)
+    review(pack, ask=answers_ask(pack, edits), confirm=confirm_by_word(pack, sign_word),
+           reviewer=reviewer, output_dir=output_dir, sign=sign_word is not None)
+    saved_at = _utc_now()
+    pdf_path = save_pack(pack, output_dir)
+    notices = [w for w in pack.warnings if w in SIGN_OFF_WARNINGS]
+    return PipelineResult(pack=pack, pdf_path=pdf_path, audit_path=output_dir / AUDIT_FILE,
+                          notices=notices, saved_at=saved_at)

@@ -1393,7 +1393,7 @@ class TestNumericCheck:
         p = copy.deepcopy(narrated)
         p.section(SectionType.CASH).narrative = "Cash was £1,176."
         assert [f.message for f in numeric_check(p)] == [
-            "cash: '£1,176' matches no figure in the pack"]
+            "Cash balance: '£1,176' matches no figure in the pack"]
 
 
 # ── NARRATE: MODEL PATH (fake clients, no network) ────────────────────
@@ -1489,8 +1489,8 @@ class TestNarrateModel:
         sections = dict(MODEL_SECTIONS, exec_summary="Revenue was £3.1m, a 7.2% fall.")
         p = self._run(FakeClient(json.dumps(sections)))
         assert [f.message for f in p.numeric_warnings] == [
-            "exec_summary: '£3.1m' matches no figure in the pack",
-            "exec_summary: '7.2%' matches no figure in the pack",
+            "Executive summary: '£3.1m' matches no figure in the pack",
+            "Executive summary: '7.2%' matches no figure in the pack",
         ]
 
     def test_dashes_in_model_output_are_replaced(self):
@@ -1560,7 +1560,7 @@ class TestNarrativeSafeguards:
         p = self._model_run(exec_summary="Revenue was £2.48m, £112k below budget, "
                                          "due to softer demand.")
         assert [f.message for f in p.cause_warnings] == [
-            "exec_summary: 'due to' may state a cause"]
+            "Executive summary: 'due to' may state a cause"]
         assert p.section(SectionType.EXEC_SUMMARY).drafted_by == "model"
         assert p.numeric_warnings == []
 
@@ -1752,7 +1752,7 @@ class TestReview:
     def test_reviewer_typo_is_flagged_listed_and_acknowledged(self, tmp_path):
         script = Script({"Profit and loss": lambda t: t.replace("£1.64m", "£1.46m")})
         p = _run_review(_narrated_sample(), script, tmp_path)
-        message = "pnl: '£1.46m' matches no figure in the pack (in the reviewer's text)"
+        message = "Profit and loss: '£1.46m' matches no figure in the pack (in the reviewer's text)"
         assert [f.message for f in p.numeric_warnings] == [message]
         assert script.summaries == [[message]]
         assert p.status is PackStatus.FINAL and p.acknowledged == [message]
@@ -1764,7 +1764,7 @@ class TestReview:
         script = Script({"Executive summary": lambda t: t + " The closure cost £20k."})
         p = _run_review(_narrated_sample(), script, tmp_path)
         assert [f.message for f in p.numeric_warnings] == [
-            "exec_summary: '£20k' matches no figure in the pack (in the reviewer's text)"]
+            "Executive summary: '£20k' matches no figure in the pack (in the reviewer's text)"]
 
     def test_excluded_rows_are_stated_in_the_summary(self, tmp_path):
         from config import KPIS_PATH
@@ -1850,7 +1850,7 @@ class TestReview:
         p = self._model_pack(exec_summary="Revenue was £3.1m.")
         script = Script({"Executive summary": lambda t: "Revenue was £2.48m."})
         _run_review(p, script, tmp_path)
-        assert script.asked[0][2] == ["exec_summary: '£3.1m' matches no figure in the pack"]
+        assert script.asked[0][2] == ["Executive summary: '£3.1m' matches no figure in the pack"]
         (flag,) = p.numeric_warnings
         assert flag.resolved and flag.raised_on == "draft"
         assert script.summaries == [[]]
@@ -1861,7 +1861,7 @@ class TestReview:
         p = self._model_pack(exec_summary="Revenue was £2.48m, due to softer demand.")
         script = Script()
         _run_review(p, script, tmp_path)
-        message = "exec_summary: 'due to' may state a cause"
+        message = "Executive summary: 'due to' may state a cause"
         assert script.asked[0][2] == [message]
         assert p.acknowledged == [message]
 
@@ -1928,7 +1928,7 @@ LIVE_RUN_1_EXEC = (
     "it £193k below budget; the prior year recorded a profit of £101k. Marketing "
     "expenditure was £298k, £38k (14.5%) above budget and 23.1% above last year.")
 
-DIRECTION_MESSAGE = ("exec_summary: 'partially offset' describes an offset; attribution "
+DIRECTION_MESSAGE = ("Executive summary: 'partially offset' describes an offset; attribution "
                      "belongs to the computed drivers table, not the narrative")
 
 
@@ -1956,7 +1956,7 @@ class TestDirectionFlag:
         p = narrate(_assemble_sample(), client=FakeClient(json.dumps(dict(
             MODEL_SECTIONS, pnl="Retail fell £56k, offset by Export."))))
         assert [f.message for f in p.direction_warnings] == [
-            "pnl: 'offset' describes an offset; attribution belongs to the computed "
+            "Profit and loss: 'offset' describes an offset; attribution belongs to the computed "
             "drivers table, not the narrative"]
 
     def test_template_text_is_never_scanned(self, narrated):
@@ -2137,7 +2137,7 @@ class TestRender:
         assert text in _flat(_pdf_pages(draft_pdf))
 
     def test_sign_off_wording(self, final_pdf, draft_pdf, final_pack):
-        from src.step7_render import _when
+        from src.formatting import when_text as _when
         final = _flat(_pdf_pages(final_pdf))
         assert f"Reviewed and signed off by A. Controller on {_when(final_pack.sign_off_at)}." in final
         assert f"Generated {_when(final_pack.sign_off_at)}." in final
@@ -2338,7 +2338,7 @@ class TestRender:
 # ── GLYPHS, DRAFT-ONLY RECORD, CODE VERSION ───────────────────────────
 
 APPROX = "\u2248"
-GLYPH_MESSAGE = ("exec_summary: '\u2248' (U+2248) cannot be printed in the PDF font and "
+GLYPH_MESSAGE = ("Executive summary: '\u2248' (U+2248) cannot be printed in the PDF font and "
                  "would appear as '?'")
 
 
@@ -2599,6 +2599,17 @@ class TestSharedTables:
             ("", "Export", "(28,810)"), ("EBIT", "Retail", "(56,180)"),
             ("", "Marketing", "(37,640)"), ("", "Ingredients", "(37,310)")]
 
+    def test_the_notes_travel_with_the_rows(self, pack, final_pdf):
+        from src.tables import CASH_NOTE, DRIVERS_NOTE, KPI_NOTE, pnl_notes
+        notes = pnl_notes(pack)
+        assert notes[0].startswith("* Material: a variance against budget of £50,000 or 10.0%")
+        assert notes[1] == ("Figures are calculated before rounding, so totals and "
+                            "differences may not add exactly.")
+        assert notes[2].startswith("Fav/(Adv): favourable variances")
+        text = _flat(_pdf_pages(final_pdf))
+        for note in [*notes, DRIVERS_NOTE, KPI_NOTE, CASH_NOTE]:
+            assert note in text, note
+
     def test_the_pdf_draws_the_shared_rows(self, final_pack):
         from src.step7_render import _pnl_table
         from src.tables import pnl_rows
@@ -2637,3 +2648,118 @@ class TestCheckText:
         before = copy.deepcopy(narrated)
         check_text(narrated, "cash", "Cash was £1,176 \u2192 low.")
         assert narrated == before
+
+
+# ── THE PIPELINE SURFACE FOR THE WEB LAYER ────────────────────────────
+
+class TestPipelineSurface:
+    def _draft(self, tmp_path):
+        from config import KPIS_PATH, PNL_PATH
+        from src.pipeline import run_pipeline
+        return run_pipeline(PNL_PATH, KPIS_PATH, tmp_path, draft_only=True).pack
+
+    def test_every_export_resolves(self):
+        import src.pipeline as pipeline
+        assert [n for n in pipeline.__all__ if not hasattr(pipeline, n)] == []
+        assert {"review_and_save", "signoff_summary", "check_text",
+                "audit_text"} <= set(pipeline.__all__)
+
+    @pytest.mark.parametrize("text, expected", [
+        ("SIGN", True), ("  SIGN ", True), ("sign", False), ("Sign", False),
+        ("SIGNED", False), ("", False), (None, False)])
+    def test_one_sign_rule(self, text, expected):
+        from src.pipeline import is_sign_word
+        assert is_sign_word(text) is expected
+
+    def test_save_as_draft_keeps_the_edits(self, tmp_path):
+        from src.pipeline import review_and_save
+        pack = self._draft(tmp_path)
+        edited = pack.section(SectionType.CASH).narrative + " A customer paid late."
+        result = review_and_save(pack, tmp_path, edits={"cash": edited}, reviewer="A. Controller")
+        assert result.pack.status is PackStatus.DRAFT and result.notices == []
+        assert result.pack.section(SectionType.CASH).narrative == edited
+        assert "A customer paid late." in _flat(_pdf_pages(result.pdf_path.read_bytes()))
+        events = [l["event"] for l in _audit_lines(tmp_path)]
+        assert events == ["review", "rendered", "review", "rendered"]
+
+    def test_save_as_draft_without_a_name_is_not_a_refusal(self, tmp_path):
+        from src.pipeline import review_and_save
+        result = review_and_save(self._draft(tmp_path), tmp_path, edits={})
+        assert result.notices == [] and result.pack.status is PackStatus.DRAFT
+        assert "sign-off needs a reviewer name" not in " ".join(result.pack.warnings)
+        assert _audit_lines(tmp_path)[-2]["warnings"] == []
+
+    def test_sign_with_the_word_and_a_name(self, tmp_path):
+        from src.pipeline import review_and_save
+        result = review_and_save(self._draft(tmp_path), tmp_path, edits={},
+                                 reviewer="A. Controller", sign_word="SIGN")
+        assert result.pack.status is PackStatus.FINAL and result.notices == []
+        assert result.pdf_path.name.endswith("_FINAL.pdf")
+
+    @pytest.mark.parametrize("reviewer, word, notice", [
+        ("A. Controller", "sign", "review: sign-off needs the word SIGN typed exactly, "
+                                  "so the pack stays DRAFT"),
+        ("", "SIGN", "review: sign-off needs a reviewer name, so the pack stays DRAFT"),
+    ])
+    def test_the_engine_refuses_and_says_why(self, tmp_path, reviewer, word, notice):
+        from src.pipeline import review_and_save
+        result = review_and_save(self._draft(tmp_path), tmp_path, edits={},
+                                 reviewer=reviewer, sign_word=word)
+        assert result.pack.status is PackStatus.DRAFT
+        assert result.notices == [notice]
+        assert notice in _audit_lines(tmp_path)[-2]["warnings"]     # the refused review line
+
+    def test_a_refusal_is_not_carried_into_the_next_attempt(self, tmp_path):
+        from src.pipeline import review_and_save, signoff_summary
+        pack = self._draft(tmp_path)
+        review_and_save(pack, tmp_path, edits={}, reviewer="A. Controller", sign_word="sign")
+        assert signoff_summary(pack, {}) == []
+        result = review_and_save(pack, tmp_path, edits={}, reviewer="A. Controller",
+                                 sign_word="SIGN")
+        assert result.pack.status is PackStatus.FINAL and result.pack.acknowledged == []
+
+    def test_signoff_summary_is_what_review_passes_to_confirm(self, tmp_path):
+        import src.pipeline as pipeline
+        pack = self._draft(tmp_path)
+        edits = {"exec_summary": pack.section(SectionType.EXEC_SUMMARY).narrative +
+                 " The closure cost £20k \u2248 a fortnight of sales."}
+        before = copy.deepcopy(pack)
+        preview = pipeline.signoff_summary(pack, edits)
+        assert pack == before                      # the preview changes nothing
+        seen = []
+        real = pipeline.confirm_by_word
+        pipeline.confirm_by_word = lambda p, w: (lambda s: seen.append(list(s)) or real(p, w)(s))
+        try:
+            pipeline.review_and_save(pack, tmp_path, edits=edits, reviewer="A. Controller",
+                                     sign_word="SIGN")
+        finally:
+            pipeline.confirm_by_word = real
+        assert seen == [preview]
+        assert [line.split(": ", 1)[1][:8] for line in preview] == ["'£20k' m", "'\u2248' (U+2"]
+
+    def test_audit_text_by_run(self, tmp_path):
+        from src.pipeline import audit_text, review_and_save
+        assert audit_text(tmp_path) == ""
+        pack = self._draft(tmp_path)
+        first = pack.run_id
+        review_and_save(pack, tmp_path, edits={}, reviewer="A. Controller", sign_word="SIGN")
+        lines = [json.loads(l) for l in audit_text(tmp_path, pack.run_id).splitlines()]
+        assert [(l["event"], l["run_id"]) for l in lines] == [
+            ("review", pack.run_id), ("rendered", pack.run_id)]
+        assert len(audit_text(tmp_path).splitlines()) == 4
+        assert first != pack.run_id
+
+    def test_review_and_save_refuses_a_final_pack(self, tmp_path):
+        from src.pipeline import review_and_save
+        from src.step6_review import AlreadySignedOff
+        pack = self._draft(tmp_path)
+        review_and_save(pack, tmp_path, edits={}, reviewer="A. Controller", sign_word="SIGN")
+        with pytest.raises(AlreadySignedOff):
+            review_and_save(pack, tmp_path, edits={}, reviewer="A. Controller", sign_word="SIGN")
+
+    def test_flag_detail_and_message(self):
+        from src.state import Flag
+        flag = Flag(section="pnl", kind="numeric", text="£1.46m", raised_on="reviewer")
+        assert flag.detail == "'£1.46m' matches no figure in the pack"
+        assert flag.message == ("Profit and loss: '£1.46m' matches no figure in the pack "
+                                "(in the reviewer's text)")

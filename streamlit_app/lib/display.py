@@ -9,7 +9,7 @@
 
 import html
 
-from src.tables import DRIVERS_HEADER, PNL_HEADER, DriverRow, PnlRow
+from src.pipeline import DRIVERS_HEADER, PNL_HEADER, DriverRow, PnlRow
 
 _E = html.escape
 

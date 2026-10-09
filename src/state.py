@@ -71,6 +71,16 @@ class SectionType(Enum):
     CASH = "cash"
 
 
+# The one place a section's display title is written: the PDF headings, the
+# web boxes, the CLI prompts and every flag message read it from here.
+SECTION_TITLES = {
+    SectionType.EXEC_SUMMARY.value: "Executive summary",
+    SectionType.PNL.value: "Profit and loss",
+    SectionType.KPIS.value: "Key performance indicators",
+    SectionType.CASH.value: "Cash balance",
+}
+
+
 class PackStatus(Enum):
     """Pack lifecycle: DRAFT until the reviewer signs off."""
     DRAFT = "draft"
@@ -266,18 +276,27 @@ class Flag:
     resolved: bool = False
 
     @property
-    def message(self) -> str:
+    def detail(self) -> str:
+        """What the flag says, without its section or where it was raised."""
         if self.kind == NUMERIC:
-            msg = f"{self.section}: '{self.text}' matches no figure in the pack"
-        elif self.kind == GLYPH:
-            msg = (f"{self.section}: '{self.text}' (U+{ord(self.text[0]):04X}) cannot be "
-                   f"printed in the PDF font and would appear as '?'")
-        elif self.kind == DIRECTION:
-            msg = (f"{self.section}: '{self.text}' describes an offset; attribution "
-                   f"belongs to the computed drivers table, not the narrative")
-        else:
-            msg = f"{self.section}: '{self.text}' may state a cause"
-        return msg + (" (in the reviewer's text)" if self.raised_on == REVIEWER_TEXT else "")
+            return f"'{self.text}' matches no figure in the pack"
+        if self.kind == GLYPH:
+            return (f"'{self.text}' (U+{ord(self.text[0]):04X}) cannot be printed in the "
+                    f"PDF font and would appear as '?'")
+        if self.kind == DIRECTION:
+            return (f"'{self.text}' describes an offset; attribution belongs to the "
+                    f"computed drivers table, not the narrative")
+        return f"'{self.text}' may state a cause"
+
+    @property
+    def message(self) -> str:
+        """
+        The one display form of a flag, used everywhere a person reads it: the
+        boxes on screen, the sign-off summary, the CLI and the PDF review
+        notes. It names the section by its title, never its internal key.
+        """
+        origin = " (in the reviewer's text)" if self.raised_on == REVIEWER_TEXT else ""
+        return f"{SECTION_TITLES.get(self.section, self.section)}: {self.detail}{origin}"
 
 
 # -- Materiality flags --------------------------------------------------------
