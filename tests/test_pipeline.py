@@ -19,7 +19,9 @@ narrative; the soft numeric check; the model path with fake clients only;
 the narrative safeguards (cause flag, n/m across a change of sign, cash
 once, drivers grouped by effect); review, sign-off and the audit log; the
 direction flag and the audit additions; the Fav/(Adv) table cells; the PDF
-render (text extracted with pypdf) and the linked rendered event.
+render (text extracted with pypdf) and the linked rendered event; the computed
+drivers block; glyph flags and the draft-only record; main.py and run_pipeline
+(in process with scripted input, and as a subprocess for --draft-only).
 
 No test opens a network connection: conftest.py blocks sockets suite-wide.
 """
@@ -32,6 +34,7 @@ import csv
 import dataclasses
 import io
 import json
+import os
 import re
 import sys
 import types
@@ -1259,26 +1262,22 @@ class TestNarrateTemplate:
         assert narrated.numeric_warnings == []
         assert narrated.warnings == []
 
-    @pytest.mark.parametrize("phrase", [
-        "Revenue was £2.48m, £112k (4.3%) below budget and 5.5% above last year.",
-        "Gross profit was £866k, £147k (14.5%) below budget",
-        "Retail (£56k below budget)",
-        "Ingredients (£37k above budget)",
-        "Export (£29k below budget)",
-        "Gross margin was 35.0%, 4.1 pts below budget and 3.7 pts below last year.",
-        "EBIT was a loss of £46k against a budgeted profit of £147k",
-        "Marketing was £298k, £38k (14.5%) above budget",
-    ])
-    def test_exec_summary_has_every_worked_example_figure(self, narrated, phrase):
-        assert phrase in narrated.section(SectionType.EXEC_SUMMARY).narrative
+    def test_exec_summary_worked_example(self, narrated):
+        # Revenue, Gross profit, Gross margin, EBIT, Marketing: what moved and by
+        # how much. No attribution: the drivers are a computed table in the PDF.
+        assert narrated.section(SectionType.EXEC_SUMMARY).narrative == (
+            "Revenue was £2.48m, £112k (4.3%) below budget and 5.5% above last year. "
+            "Gross profit was £866k, £147k (14.5%) below budget and 4.7% below last year. "
+            "Gross margin was 35.0%, 4.1 pts below budget and 3.7 pts below last year. "
+            "EBIT was a loss of £46k against a budgeted profit of £147k (£193k below "
+            "budget) and a profit of £101k last year. "
+            "Marketing was £298k, £38k (14.5%) above budget and 23.1% above last year.")
 
-    def test_exec_summary_order_and_no_repeated_drivers(self, narrated):
+    def test_exec_summary_does_not_attribute(self, narrated):
         text = narrated.section(SectionType.EXEC_SUMMARY).narrative
-        order = ["Revenue was", "Gross profit was", "gross profit variance",
-                 "Gross margin was", "EBIT was", "Marketing was"]
-        assert [text.index(p) for p in order] == sorted(text.index(p) for p in order)
-        assert "EBIT variance" not in text      # its drivers are all named already
-        assert "Food service" not in text       # revenue lines are the P&L section's job
+        for word in ("Ingredients", "Retail", "Export", "Food service", "offset",
+                     "came mainly from", "variance against budget"):
+            assert word not in text
 
     def test_pnl_commentary(self, narrated):
         assert narrated.section(SectionType.PNL).narrative == (
@@ -1303,24 +1302,20 @@ class TestNarrateTemplate:
             assert not re.search(r"-\d", s.narrative)
             assert "\u2013" not in s.narrative and "\u2014" not in s.narrative
 
-    def test_45k_names_marketing_as_an_ebit_driver(self):
+    def test_45k_features_opex_without_attribution(self):
         from src.step5_narrate import narrate
         p = narrate(_assemble_sample(materiality_abs=45000))
         text = p.section(SectionType.EXEC_SUMMARY).narrative
         assert "Opex was £913k, £47k (5.4%) above budget and 12.9% above last year." in text
-        assert ("The EBIT variance against budget came mainly from "
-                "Marketing (£38k above budget).") in text
+        assert "variance against budget" not in text and "Marketing" not in text
         assert p.numeric_warnings == []
 
-    def test_partly_offset_driver(self):
+    def test_a_genuine_offset_is_not_narrated_either(self):
         from src.step5_narrate import narrate
         lines = [_pl("Sales", Category.REVENUE, 900000, 1000000),
                  _pl("Materials", Category.COGS, 370000, 400000)]
-        p = narrate(_assemble_lines(lines))
-        assert ("The gross profit variance against budget came mainly from Sales "
-                "(£100k below budget), partly offset by Materials (£30k below budget)."
-                ) in p.section(SectionType.EXEC_SUMMARY).narrative
-        assert p.numeric_warnings == []
+        text = narrate(_assemble_lines(lines)).section(SectionType.EXEC_SUMMARY).narrative
+        assert "offset" not in text and "Materials" not in text
 
     def test_nothing_material_says_so(self):
         from src.step5_narrate import narrate
@@ -1610,27 +1605,18 @@ class TestNarrativeSafeguards:
 
     # -- A4 and A5 --------------------------------------------------------------
 
-    # -- Driver lines in the prompt say which way each line moved the subtotal --
+    # -- The prompt carries no drivers: attribution is computed, not narrated ---
 
-    def test_prompt_groups_drivers_by_effect(self):
+    def test_prompt_carries_no_drivers(self):
         from src.step5_narrate import build_prompt, narrative_facts
         p = _assemble_sample()
-        _, user = build_prompt(narrative_facts(p), p.entity, p.period)
-        # The first live run read Ingredients (a cost above budget) as an offset.
-        assert ("Gross profit was below budget. Lines that lowered it: Retail, £56k "
-                "below budget; Ingredients, £37k above budget; Export, £29k below "
-                "budget.") in user
-        assert "partly offset" not in user.split("pnl:")[0].split("Drivers")[1]
-
-    def test_prompt_names_a_genuine_offset(self):
-        from src.step5_narrate import build_prompt, narrative_facts
-        lines = [_pl("Sales", Category.REVENUE, 900000, 1000000),
-                 _pl("Materials", Category.COGS, 370000, 400000)]
-        p = _assemble_lines(lines)
-        _, user = build_prompt(narrative_facts(p), p.entity, p.period)
-        assert ("Gross profit was below budget. Lines that lowered it: Sales, £100k "
-                "below budget. Lines that partly offset this: Materials, £30k below "
-                "budget.") in user
+        system, user = build_prompt(narrative_facts(p), p.entity, p.period)
+        assert "Drivers" not in user and "Ingredients" not in user
+        assert "Lines that" not in user and "offset" not in user
+        assert ("2. Say what moved and by how much. Do not say which lines drove a "
+                "movement or which lines offset it: that attribution is computed and "
+                "shown in a table beside the summary.") in system
+        assert "Cover the featured items in the order given and the gross margin." in user
 
     def test_cash_appears_once(self, narrated):
         assert "£1.18m" not in narrated.section(SectionType.KPIS).narrative
@@ -1918,8 +1904,8 @@ LIVE_RUN_1_EXEC = (
     "it £193k below budget; the prior year recorded a profit of £101k. Marketing "
     "expenditure was £298k, £38k (14.5%) above budget and 23.1% above last year.")
 
-DIRECTION_MESSAGE = ("exec_summary: 'partially offset' describes an offset, but the "
-                     "facts list no offsetting line")
+DIRECTION_MESSAGE = ("exec_summary: 'partially offset' describes an offset; attribution "
+                     "belongs to the computed drivers table, not the narrative")
 
 
 class TestDirectionFlag:
@@ -1930,7 +1916,8 @@ class TestDirectionFlag:
         assert [f.message for f in p.direction_warnings] == [DIRECTION_MESSAGE]
         assert p.numeric_warnings == [] and p.cause_warnings == []
 
-    def test_a_genuine_offset_written_as_an_offset_is_not_flagged(self):
+    def test_even_a_genuine_offset_in_model_prose_is_flagged(self):
+        # The narrative no longer attributes at all; the drivers table does.
         from src.step5_narrate import narrate
         lines = [_pl("Sales", Category.REVENUE, 900000, 1000000),
                  _pl("Materials", Category.COGS, 370000, 400000)]
@@ -1938,20 +1925,21 @@ class TestDirectionFlag:
                 "(£100k below budget), partly offset by Materials (£30k below budget).")
         p = narrate(_assemble_lines(lines),
                     client=FakeClient(json.dumps(dict(MODEL_SECTIONS, exec_summary=text))))
-        assert p.direction_warnings == []
+        assert [f.text for f in p.direction_warnings] == ["partly offset"]
 
     def test_offset_language_in_a_section_without_drivers_is_flagged(self):
         from src.step5_narrate import narrate
         p = narrate(_assemble_sample(), client=FakeClient(json.dumps(dict(
             MODEL_SECTIONS, pnl="Retail fell £56k, offset by Export."))))
         assert [f.message for f in p.direction_warnings] == [
-            "pnl: 'offset' describes an offset, but the facts list no offsetting line"]
+            "pnl: 'offset' describes an offset; attribution belongs to the computed "
+            "drivers table, not the narrative"]
 
     def test_template_text_is_never_scanned(self, narrated):
-        from src.step5_narrate import direction_check, narrative_facts
+        from src.step5_narrate import direction_check
         p = copy.deepcopy(narrated)
         p.section(SectionType.EXEC_SUMMARY).narrative += " This was partially offset elsewhere."
-        assert direction_check(p, narrative_facts(p)) == []
+        assert direction_check(p) == []
         assert narrated.direction_warnings == []
 
     def test_flag_shown_at_review_acknowledged_and_audited(self, tmp_path):
@@ -2250,3 +2238,260 @@ class TestRender:
         assert rendered["pdf_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
         assert rendered["run_id"] == review_line["run_id"] == p.run_id
         assert datetime.fromisoformat(rendered["timestamp"]).utcoffset() == timedelta(0)
+
+    # -- The computed drivers block -------------------------------------------
+
+    def test_drivers_block_under_the_executive_summary(self, final_pdf):
+        text = _flat(_pdf_pages(final_pdf))
+        block = ("Main drivers of the variance against budget Subtotal Line Impact on "
+                 "profit Fav/(Adv) £ Gross profit Retail (56,180) Ingredients (37,310) "
+                 "Export (28,810) EBIT Retail (56,180) Marketing (37,640) Ingredients (37,310)")
+        assert block in text
+        assert text.index("Executive summary") < text.index(block) < text.index("Profit and loss")
+
+    def test_a_genuine_offset_shows_plain_in_the_drivers_block(self, tmp_path):
+        from src.step7_render import render
+        lines = [_pl("Sales", Category.REVENUE, 900000, 1000000),
+                 _pl("Materials", Category.COGS, 370000, 400000)]
+        text = _flat(_pdf_pages(render(_assemble_lines(lines))))
+        assert "Gross profit Sales (100,000) Materials 30,000" in text
+
+    def test_no_drivers_block_when_neither_subtotal_is_material(self):
+        from src.step5_narrate import narrate
+        from src.step7_render import render
+        p = narrate(_assemble_sample(materiality_abs=10000000, materiality_pct=500))
+        assert "Main drivers" not in _flat(_pdf_pages(render(p)))
+
+
+# ── GLYPHS, DRAFT-ONLY RECORD, CODE VERSION ───────────────────────────
+
+APPROX = "\u2248"
+GLYPH_MESSAGE = ("exec_summary: '\u2248' (U+2248) cannot be printed in the PDF font and "
+                 "would appear as '?'")
+
+
+class TestGlyphsAndDraftRecord:
+    def test_unprintable_lists_each_character_once(self):
+        from src.formatting import unprintable
+        assert unprintable("£20k \u2248 lost \u2248 sales \u2192 ok, caf\u00e9 \u2013 fine") == [
+            "\u2248", "\u2192"]
+
+    def test_reviewer_character_is_flagged_shown_and_acknowledged(self, tmp_path):
+        script = Script({"Executive summary": lambda t: t + f" The closure cost £20k {APPROX} lost sales."})
+        p = _run_review(_narrated_sample(), script, tmp_path)
+        (flag,) = p.glyph_warnings
+        assert flag.message == GLYPH_MESSAGE + " (in the reviewer's text)"
+        assert flag.raised_on == "reviewer"
+        assert GLYPH_MESSAGE + " (in the reviewer's text)" in script.summaries[0]
+        assert GLYPH_MESSAGE + " (in the reviewer's text)" in p.acknowledged
+        (line,) = _audit_lines(tmp_path)
+        assert line["glyph_warnings"][0]["text"] == APPROX
+
+    def test_model_character_is_flagged_as_draft(self, tmp_path):
+        p = _narrated_sample(client=FakeClient(json.dumps(dict(
+            MODEL_SECTIONS, pnl="Retail was £56k (3.3%) below budget \u2192 lower."))))
+        script = Script()
+        _run_review(p, script, tmp_path)
+        (flag,) = p.glyph_warnings
+        assert (flag.section, flag.text, flag.raised_on) == ("pnl", "\u2192", "draft")
+        assert script.asked[1][2] == [] and flag.message in script.summaries[0]
+
+    def test_fixing_the_text_on_a_second_pass_resolves_the_flag(self, tmp_path):
+        p = _narrated_sample()
+        _run_review(p, Script({"Executive summary": lambda t: t + f" Cost {APPROX} £20k."},
+                              answer=False), tmp_path)
+        script = Script({"Executive summary": lambda t: t.replace(APPROX, "about")})
+        _run_review(p, script, tmp_path)
+        assert p.glyph_warnings[0].resolved
+        assert not any("cannot be printed" in s for s in script.summaries[0])
+
+    def test_clean_sample_raises_no_glyph_flags(self, tmp_path):
+        p = _run_review(_narrated_sample(), Script(), tmp_path)
+        assert p.glyph_warnings == []
+
+    def test_renderer_still_substitutes_as_a_last_resort(self, tmp_path):
+        from src.step7_render import render
+        p = _run_review(_narrated_sample(), Script(
+            {"Executive summary": lambda t: t + f" £20k {APPROX} lost sales."}), tmp_path)
+        text = _flat(_pdf_pages(render(p)))
+        assert "£20k ? lost sales" in text and APPROX not in text
+
+    def test_record_draft_writes_a_draft_review_line_without_prompts(self, tmp_path):
+        from src.step6_review import record_draft
+        p = _narrated_sample(client=FakeClient(json.dumps(dict(
+            MODEL_SECTIONS, cash="Cash was £1.18m \u2192 below target."))))
+        record_draft(p, output_dir=tmp_path)
+        assert p.status is PackStatus.DRAFT and p.run_id
+        assert [f.text for f in p.glyph_warnings] == ["\u2192"]
+        (line,) = _audit_lines(tmp_path)
+        assert (line["event"], line["mode"], line["status"]) == ("review", "draft_only", "draft")
+        assert line["reviewer"] is None and line["sign_off_at"] is None
+
+    def test_interactive_review_line_is_marked_interactive(self, tmp_path):
+        _run_review(_narrated_sample(), Script(), tmp_path)
+        (line,) = _audit_lines(tmp_path)
+        assert line["mode"] == "interactive"
+
+    def test_audit_holds_the_drivers(self, tmp_path):
+        _run_review(_narrated_sample(), Script(), tmp_path)
+        (line,) = _audit_lines(tmp_path)
+        drivers = line["materiality"]["drivers"]
+        assert [(d["name"], d["impact"]) for d in drivers["subtotal:gross_profit"]] == [
+            ("Retail", "-56180"), ("Ingredients", "-37310"), ("Export", "-28810")]
+        assert [d["name"] for d in drivers["subtotal:ebit"]] == ["Retail", "Marketing", "Ingredients"]
+
+    def test_code_version_marks_uncommitted_changes(self, monkeypatch):
+        import subprocess
+        from src.step6_review import code_version
+        answers = {("rev-parse", "--short", "HEAD"): "9bf5900\n", ("status", "--porcelain"): ""}
+
+        def fake_git(cmd, **kwargs):
+            return types.SimpleNamespace(returncode=0, stdout=answers[tuple(cmd[1:])])
+        monkeypatch.setattr(subprocess, "run", fake_git)
+        assert code_version() == "9bf5900"
+        answers[("status", "--porcelain")] = " M src/step5_narrate.py\n"
+        assert code_version() == "9bf5900+uncommitted"
+
+
+# ── MAIN AND THE PIPELINE ─────────────────────────────────────────────
+
+PROMPTS = ("Reviewer name", "Press Enter", "Type SIGN")
+
+
+def _main(argv, typed=""):
+    """Run main() in process with typed input; returns (exit code, terminal output)."""
+    import main as cli
+    out = io.StringIO()
+    code = cli.main(argv, stdin=io.StringIO(typed), stdout=out)
+    return code, out.getvalue()
+
+
+def _cli_subprocess(*args):
+    import subprocess
+    return subprocess.run(
+        [sys.executable, "main.py", *args], cwd=ROOT, stdin=subprocess.DEVNULL,
+        capture_output=True, timeout=180, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+
+
+class TestMain:
+    def test_run_pipeline_on_the_sample(self, tmp_path):
+        from config import KPIS_PATH, PNL_PATH
+        from src.pipeline import run_pipeline
+        script = Script()
+        result = run_pipeline(PNL_PATH, KPIS_PATH, tmp_path, ask=script.ask,
+                              confirm=script.confirm, reviewer="A. Controller")
+        p = result.pack
+        assert p.status is PackStatus.FINAL and result.pdf_path.exists()
+        text = _flat(_pdf_pages(result.pdf_path.read_bytes()))
+        assert "EBIT * (46,120)" in text and "Gross margin 35.0%" in text
+        assert "Main drivers of the variance against budget" in text
+        assert _names(p, p.material_flags.exec_summary_items) == [
+            "Revenue", "Gross profit", "EBIT", "Marketing"]
+        assert _names(p, p.material_flags.pnl_commentary_items) == ["Retail", "Export"]
+        review_line, rendered = _audit_lines(tmp_path)
+        assert (review_line["event"], rendered["event"]) == ("review", "rendered")
+        assert review_line["run_id"] == rendered["run_id"] == p.run_id
+        assert result.audit_path == tmp_path / "audit.jsonl"
+
+    def test_run_pipeline_needs_the_seams_unless_draft_only(self, tmp_path):
+        from config import KPIS_PATH, PNL_PATH
+        from src.pipeline import run_pipeline
+        with pytest.raises(ValueError, match="draft_only"):
+            run_pipeline(PNL_PATH, KPIS_PATH, tmp_path)
+
+    def test_draft_only_as_a_subprocess(self, tmp_path):
+        done = _cli_subprocess("--draft-only", "--output", str(tmp_path))
+        out = done.stdout.decode("utf-8")
+        assert done.returncode == 0, done.stderr.decode("utf-8")
+        assert (tmp_path / "harmwell_foods_2026_06_board_pack_DRAFT.pdf").exists()
+        assert not any(prompt in out for prompt in PROMPTS)
+        assert "Status: DRAFT" in out
+        (line, rendered) = _audit_lines(tmp_path)
+        assert (line["mode"], line["status"], rendered["event"]) == (
+            "draft_only", "draft", "rendered")
+
+    def test_sign_signs(self, tmp_path):
+        code, out = _main(["--output", str(tmp_path)], "A. Controller\n\n\n\n\nSIGN\n")
+        assert code == 0 and "Status: FINAL, signed off by A. Controller" in out
+        assert (tmp_path / "harmwell_foods_2026_06_board_pack_FINAL.pdf").exists()
+
+    @pytest.mark.parametrize("answer", ["sign", "yes", "SIGN please", ""])
+    def test_anything_but_sign_leaves_a_draft(self, tmp_path, answer):
+        code, out = _main(["--output", str(tmp_path)], f"A. Controller\n\n\n\n\n{answer}\n")
+        assert code == 0 and "Status: DRAFT" in out
+        assert (tmp_path / "harmwell_foods_2026_06_board_pack_DRAFT.pdf").exists()
+
+    def test_end_of_input_never_signs(self, tmp_path):
+        code, out = _main(["--output", str(tmp_path)], "A. Controller\n")
+        assert code == 0 and "Status: DRAFT" in out
+
+    def test_edit_flow_at_the_terminal(self, tmp_path):
+        typed = ("A. Controller\n\n\n\ne\nThe cash balance was £1.18m.\n"
+                 "A major customer paid in early July.\n.\nSIGN\n")
+        code, out = _main(["--output", str(tmp_path)], typed)
+        assert code == 0 and "Type the replacement text." in out
+        (review_line, _) = _audit_lines(tmp_path)
+        cash = review_line["sections"][3]
+        assert cash["edited"] is True
+        assert cash["final"] == ("The cash balance was £1.18m.\n"
+                                 "A major customer paid in early July.")
+
+    def test_unrecognised_answer_asks_again(self):
+        import main as cli
+        out = io.StringIO()
+        reviewer = cli.TerminalReviewer(io.StringIO("x\n\n"), out)
+        assert reviewer.ask("Cash balance", "Draft text.", ["cash: a flag"]) == "Draft text."
+        assert "Please press Enter to accept, or type e to edit." in out.getvalue()
+        assert "1. cash: a flag" in out.getvalue()
+
+    def test_use_model_without_a_key_falls_back(self, tmp_path, monkeypatch):
+        import main as cli
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr(cli, "ENV_FILE", tmp_path / "no.env")
+        code, out = _main(["--use-model", "--draft-only", "--output", str(tmp_path)])
+        assert code == 0
+        assert "no ANTHROPIC_API_KEY was found" in out
+        pdf = next(tmp_path.glob("*.pdf")).read_bytes()
+        assert "Commentary drafted by: the template" in _flat(_pdf_pages(pdf))
+
+    def test_without_use_model_main_says_the_template_is_used(self, tmp_path):
+        code, out = _main(["--draft-only", "--output", str(tmp_path)])
+        assert out.startswith("Commentary: the template")
+
+    def test_missing_input_file_is_a_plain_message(self, tmp_path):
+        done = _cli_subprocess("--pnl", str(tmp_path / "missing.csv"), "--draft-only",
+                               "--output", str(tmp_path))
+        out = done.stdout.decode("utf-8") + done.stderr.decode("utf-8")
+        assert done.returncode == 2
+        assert "Stopped: Input file not found:" in out and "Traceback" not in out
+
+    def test_a_pnl_with_no_loadable_lines_stops(self, tmp_path):
+        pnl = tmp_path / "pnl.csv"
+        _write_csv(pnl, PNL_HEADER, [["Retail", "revenue", "n/a", "1", "1"]])
+        code, out = _main(["--pnl", str(pnl), "--draft-only", "--output", str(tmp_path)])
+        assert code == 2
+        assert "Stopped: The P&L file has no lines that could be loaded" in out
+
+    def test_materiality_45k_moves_opex_into_the_summary(self, tmp_path):
+        code, _ = _main(["--draft-only", "--materiality-abs", "45000", "--output", str(tmp_path)])
+        text = _flat(_pdf_pages(next(tmp_path.glob("*.pdf")).read_bytes()))
+        assert code == 0
+        assert "Opex was £913k, £47k (5.4%) above budget and 12.9% above last year." in text
+        assert "Opex * 912,510" in text
+
+    def test_no_argument_carries_the_key(self):
+        import main as cli
+        args = vars(cli.parse_args([]))
+        assert not any("key" in name or "token" in name for name in args)
+
+    def test_main_holds_no_pipeline_logic(self):
+        tree = ast.parse((ROOT / "main.py").read_text(encoding="utf-8"))
+        modules = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+        assert not any(m and m.startswith("src.step") for m in modules)
+        assert "src.pipeline" in modules
+
+    def test_requirements_are_pinned(self):
+        for name in ("requirements.txt", "requirements-dev.txt"):
+            lines = [l.strip() for l in (ROOT / name).read_text(encoding="utf-8").splitlines()
+                     if l.strip() and not l.startswith("#") and not l.startswith("-r")]
+            assert lines and all("==" in l for l in lines), name

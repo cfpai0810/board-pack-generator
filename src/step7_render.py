@@ -71,10 +71,16 @@ _SMALL = ParagraphStyle("small", parent=_BASE, fontSize=7.5, leading=10)
 _H1 = ParagraphStyle("h1", parent=_BASE, fontName="Helvetica-Bold", fontSize=16, leading=20)
 _H2 = ParagraphStyle("h2", parent=_BASE, fontName="Helvetica-Bold", fontSize=11.5,
                      leading=15, spaceBefore=10, spaceAfter=4)
+_H3 = ParagraphStyle("h3", parent=_BASE, fontName="Helvetica-Bold", fontSize=9.5,
+                     leading=13, spaceBefore=8, spaceAfter=3)
 _BANNER = ParagraphStyle("banner", parent=_BASE, fontName="Helvetica-Bold", fontSize=11,
                          textColor=colors.white, alignment=TA_CENTER)
 
 _COST_PREFIXES = {"cogs", "opex"}
+
+# Subtotals whose drivers are tabulated: the ones that span categories, so
+# the table says which side of the P&L moved them.
+_ATTRIBUTED = (subtotal_key("gross_profit"), subtotal_key("ebit"))
 _LEGAL_SUFFIXES = {"ltd", "limited", "plc", "llp", "inc", "llc"}
 
 
@@ -195,6 +201,40 @@ def _pnl_table(pack: Pack) -> Table:
 
 # -- KPI and cash tables ------------------------------------------------------
 
+def _drivers_block(pack: Pack) -> list:
+    """
+    "Main drivers of the variance against budget": for Gross profit and
+    EBIT when material, each driver line with its impact on profit in
+    Fav/(Adv) form. The impact is stored in profit terms already, so no
+    flip: a line that lowered profit is bracketed, a genuine offset is
+    plain. Computed, not drafted, and not editable at review: attribution
+    is arithmetic, which the live model runs could not convey reliably.
+    """
+    drivers = pack.section(SectionType.EXEC_SUMMARY).figures["drivers"]
+    rows = [["Subtotal", "Line", "Impact on profit"], ["", "", "Fav/(Adv) £"]]
+    for key in _ATTRIBUTED:
+        for i, d in enumerate(drivers.get(key, [])):
+            rows.append([pack.item(key)["name"] if i == 0 else "", _safe(d["name"]),
+                         fav_adv(d["impact"], cost=False)])
+    if len(rows) == 2:
+        return []
+    table = Table(rows, colWidths=[3.6 * cm, 4.6 * cm, 3.4 * cm], hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("FONT", (0, 0), (-1, -1), "Helvetica", 8),
+        ("FONT", (0, 0), (-1, 1), "Helvetica-Bold", 8),
+        ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+        ("LINEBELOW", (0, 1), (-1, 1), 0.6, RULE),
+        ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    return [KeepTogether([
+        _para("Main drivers of the variance against budget", _H3),
+        table,
+        Spacer(1, 3),
+        _para("Computed from the P&L: each line's budget variance as its effect on "
+              "profit. The commentary does not attribute; this table does.", _SMALL),
+    ])]
+
+
 def _kpi_table(pack: Pack) -> Table:
     rows = [["", "Actual", "Target", "Prior year", "vs target", "vs prior year"]]
     for k in pack.section(SectionType.KPIS).figures["kpis"]:
@@ -309,6 +349,7 @@ def _story(pack: Pack) -> list:
         Spacer(1, 6),
         _para("Executive summary", _H2),
         _para(pack.section(SectionType.EXEC_SUMMARY).narrative),
+        *_drivers_block(pack),
         _para("Profit and loss", _H2),
     ]
     if pack.excluded_pnl_rows:
@@ -328,25 +369,31 @@ def _story(pack: Pack) -> list:
               "the comparator is zero or the sign changed.", _SMALL),
         Spacer(1, 6),
         _para(pnl.narrative),
-        _para("Key performance indicators", _H2),
-        _kpi_table(pack),
-        Spacer(1, 4),
-        _para("For gross margin the target is the budget margin.", _SMALL),
+        # Each heading stays on the same page as its table: a header row
+        # stranded at the foot of a page reads as a table with no data.
+        KeepTogether([
+            _para("Key performance indicators", _H2),
+            _kpi_table(pack),
+            Spacer(1, 4),
+            _para("For gross margin the target is the budget margin.", _SMALL),
+        ]),
         Spacer(1, 6),
         _para(kpis.narrative),
-        _para("Cash", _H2),
     ]
     if cash.figures["supplied"]:
         story += [
-            _cash_table(cash.figures),
-            Spacer(1, 4),
-            _para("Converted to pounds from the KPI file, which states cash in thousands.",
-                  _SMALL),
+            KeepTogether([
+                _para("Cash", _H2),
+                _cash_table(cash.figures),
+                Spacer(1, 4),
+                _para("Converted to pounds from the KPI file, which states cash in "
+                      "thousands.", _SMALL),
+            ]),
             Spacer(1, 6),
             _para(cash.narrative),
         ]
     else:
-        story.append(_para(cash.figures["note"]))
+        story += [_para("Cash", _H2), _para(cash.figures["note"])]
         if cash.narrative != cash.figures["note"]:
             story.append(_para(cash.narrative))
     story += [KeepTogether([_para("Governance and sign-off", _H2), *_governance(pack)])]

@@ -1,0 +1,4 @@
+# Running the tests (python -m pytest tests); includes everything needed to run
+-r requirements.txt
+pytest==9.1.1
+pypdf==6.16.2

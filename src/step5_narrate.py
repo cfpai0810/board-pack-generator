@@ -26,13 +26,11 @@ commentary is always from the configured model or from the template.
 step5 never imports the Anthropic SDK: the caller builds the client and
 injects it, as step6 injects ask and confirm.
 
-Drivers in the executive summary: Revenue, COGS and Opex are each a sum of
-their own lines, and those lines are the P&L commentary's job, so their
-drivers are not repeated in the summary (that would feature the same money
-twice). Gross profit and EBIT span categories, so their drivers say which
-side moved; a driver already named, or featured as an item in its own
-right, is not named again. On the sample this names Retail, Ingredients
-and Export for gross profit, and nothing new for EBIT.
+The narrative does not attribute. Which lines moved a subtotal, and which
+way, is arithmetic, so step7 shows it as a computed table under the
+executive summary. Three live runs showed why: however the drivers were
+worded, the model read a cost overspend as an offset or set it in
+contrast. Both paths now say what moved and by how much, nothing more.
 
 The soft numeric check runs after either path. Every numeric token in the
 prose is read with its unit, converted to base units (pounds, percent,
@@ -47,11 +45,10 @@ The cause flag runs on MODEL prose only (the template never states a cause,
 and the reviewer is meant to add them). Phrases that explain rather than
 attribute ("due to", "because") go to Pack.cause_warnings for the reviewer.
 
-The direction flag also runs on model prose only. The facts say, for each
-subtotal, whether any named driver genuinely offsets it. Offset language in
-a section whose facts list no offsetting line goes to
-Pack.direction_warnings: the first live run called a cost overspend an
-offset, with every figure correct, which no other check could see.
+The direction flag also runs on model prose only, as a backstop: since the
+narrative no longer attributes, any offset language in model prose goes to
+Pack.direction_warnings. The first live run called a cost overspend an
+offset with every figure correct, which no other check could see.
 """
 
 from __future__ import annotations
@@ -73,7 +70,6 @@ from src.state import (
 )
 
 _PROFIT_SUBTOTALS = {subtotal_key("gross_profit"), subtotal_key("ebit")}
-_DRIVER_SUBTOTALS = (subtotal_key("gross_profit"), subtotal_key("ebit"))
 
 # A trailing "(unit)" on a metric name, dropped where the formatter states
 # the unit itself (cash in pounds, gross margin in %).
@@ -84,10 +80,6 @@ MODEL = "model"
 
 
 # -- Phrases from formatted figures -------------------------------------------
-
-def _and_join(parts: list[str]) -> str:
-    return parts[0] if len(parts) == 1 else f"{', '.join(parts[:-1])} and {parts[-1]}"
-
 
 def _vs_money(var_abs: Decimal, against: str) -> str:
     """'£56k below budget', or 'in line with budget'."""
@@ -177,34 +169,6 @@ def _margin_fact(margin: dict) -> dict:
     }
 
 
-def _driver_facts(exec_figures: dict) -> list[dict]:
-    """Drivers to name for Gross profit and EBIT (see the module docstring)."""
-    items = {i["key"]: i for i in exec_figures["items"]}
-    named = {key for key, i in items.items() if i["kind"] == "line"}
-    facts = []
-    for key in _DRIVER_SUBTOTALS:
-        drivers = exec_figures["drivers"].get(key, [])
-        chosen = [d for d in drivers if d["key"] not in named]
-        named.update(d["key"] for d in chosen)
-        if not chosen:
-            continue
-        subtotal_var = items[key]["var_budget_abs"]
-        facts.append({
-            "key": key,
-            "subtotal": items[key]["name"],
-            "below_budget": subtotal_var < 0,
-            "drivers": [
-                {
-                    "name": d["name"],
-                    "vs_budget": _vs_money(d["var_budget_abs"], "budget"),
-                    "offsets": (d["impact"] > 0) != (subtotal_var > 0),
-                }
-                for d in chosen
-            ],
-        })
-    return facts
-
-
 def _kpi_fact(k: dict) -> dict:
     """
     One KPI line. The derived gross margin's comparator is the budget
@@ -254,7 +218,6 @@ def narrative_facts(pack: Pack) -> dict:
         SectionType.EXEC_SUMMARY.value: {
             "items": exec_items,
             "gross_margin": _margin_fact(exec_figures["gross_margin"]),
-            "drivers": _driver_facts(exec_figures),
             "note": None if exec_items else nothing_material,
         },
         SectionType.PNL.value: {
@@ -283,19 +246,6 @@ def _item_sentence(f: dict) -> str:
     return _was(f["name"], f["value"], [f["vs_budget"], f["vs_last_year"]])
 
 
-def _drivers_sentence(d: dict) -> str:
-    name = d["subtotal"] if d["subtotal"].isupper() else d["subtotal"][0].lower() + d["subtotal"][1:]
-    listed = lambda ds: _and_join([f"{x['name']} ({x['vs_budget']})" for x in ds])
-    main = [x for x in d["drivers"] if not x["offsets"]]
-    offset = [x for x in d["drivers"] if x["offsets"]]
-    lead = f"The {name} variance against budget"
-    if main and offset:
-        return f"{lead} came mainly from {listed(main)}, partly offset by {listed(offset)}."
-    if main:
-        return f"{lead} came mainly from {listed(main)}."
-    return f"{lead} was partly offset by {listed(offset)}."
-
-
 def _margin_sentence(m: dict) -> str:
     if "note" in m:
         return m["note"]
@@ -303,15 +253,12 @@ def _margin_sentence(m: dict) -> str:
 
 
 def _exec_summary_text(f: dict) -> str:
-    """Items in order; drivers after their subtotal; margin after gross profit."""
-    drivers = {d["key"]: d for d in f["drivers"]}
+    """Items in order, the margin after gross profit; no attribution (step7 shows it)."""
     sentences = [f["note"]] if f["note"] else []
     margin_at = len(sentences)
     margin_placed = False
     for item in f["items"]:
         sentences.append(_item_sentence(item))
-        if item["key"] in drivers:
-            sentences.append(_drivers_sentence(drivers[item["key"]]))
         if item["kind"] == "subtotal":
             margin_at = len(sentences)
         if item["key"] == subtotal_key("gross_profit"):
@@ -358,7 +305,7 @@ SYSTEM_PROMPT = """You draft the commentary for a monthly management pack that a
 
 Rules:
 1. Use only the figures in the facts you are given, and quote each one exactly as it is written there, for example "£112k", "4.3%" or "4.1 pts". Do not introduce any other number. Do not recalculate, combine, re-round or convert a figure.
-2. Say what moved, by how much, and which lines drove it, using the drivers given.
+2. Say what moved and by how much. Do not say which lines drove a movement or which lines offset it: that attribution is computed and shown in a table beside the summary.
 3. Do not state, guess or imply why anything moved. The reasons are added by the finance team at review. Avoid words that introduce a cause, such as "because", "due to", "as a result of" or "reflecting".
 4. Write direction in words, as the facts do ("above budget", "below last year", "a loss of"). Never write a minus sign.
 5. Use British spelling. Write plain sentences: no headings, no bullet points, no lists, and no dashes of any kind.
@@ -378,27 +325,6 @@ def _parts_line(name: str, value: str, parts: list) -> str:
     return "; ".join([f"{name}: {value}"] + [p for p in parts if p]) + "."
 
 
-def _driver_line(d: dict) -> str:
-    """
-    Drivers grouped by their effect on the subtotal. A cost line 'above
-    budget' lowers profit, but the words alone read as good news: the first
-    live run wrote that Ingredients (£37k above budget) partly offset the
-    gross profit shortfall, when it deepened it. Saying which lines lowered
-    and which raised the subtotal removes the guess.
-    """
-    listed = lambda ds: "; ".join(f"{x['name']}, {x['vs_budget']}" for x in ds)
-    main = [x for x in d["drivers"] if not x["offsets"]]
-    offset = [x for x in d["drivers"] if x["offsets"]]
-    side = "below" if d["below_budget"] else "above"
-    verb = "lowered" if d["below_budget"] else "raised"
-    line = f"{d['subtotal']} was {side} budget."
-    if main:
-        line += f" Lines that {verb} it: {listed(main)}."
-    if offset:
-        line += f" Lines that partly offset this: {listed(offset)}."
-    return line
-
-
 def build_prompt(facts: dict, entity: str, period: str) -> tuple[str, str]:
     """(system, user) for the model, built only from the formatted facts."""
     ex = facts[SectionType.EXEC_SUMMARY.value]
@@ -409,7 +335,6 @@ def build_prompt(facts: dict, entity: str, period: str) -> tuple[str, str]:
     margin = ex["gross_margin"]
     margin_line = margin.get("note") or _parts_line(
         "Gross margin", margin["value"], [margin["vs_budget"], margin["vs_last_year"]])
-    driver_lines = [_driver_line(d) for d in ex["drivers"]] or ["None to name."]
     kpi_lines = [
         _parts_line(f"{k['name']} (taken from the P&L)" if k["derived"] else k["name"],
                     k["value"] or "no actual supplied", [k["vs_target"], k["vs_last_year"]])
@@ -422,13 +347,10 @@ def build_prompt(facts: dict, entity: str, period: str) -> tuple[str, str]:
         f"Pack: {entity}, {period}.",
         "",
         "exec_summary: a short board-level summary. Cover the featured items in the order "
-        "given, the gross margin, and the drivers listed. Name a driver with its figure; "
-        "do not feature it as an item of its own.",
+        "given and the gross margin.",
         "Featured items:",
         *([_fact_line(i) for i in ex["items"]] or [f"None. {ex['note']}"]),
         margin_line,
-        "Drivers of the variance against budget:",
-        *driver_lines,
         "",
         "pnl: one sentence for each line below, giving its variance against budget and "
         "against last year.",
@@ -678,19 +600,14 @@ def find_direction_phrases(text: str) -> list[str]:
     return found
 
 
-def has_offsetting_driver(facts: dict, section: str) -> bool:
-    """True when the facts for section name a driver that genuinely offsets its subtotal."""
-    if section != SectionType.EXEC_SUMMARY.value:
-        return False
-    return any(x["offsets"] for d in facts[section]["drivers"] for x in d["drivers"])
-
-
-def direction_check(pack: Pack, facts: dict) -> list[Flag]:
-    """Flag offset language in MODEL sections whose facts list no offsetting line."""
+def direction_check(pack: Pack) -> list[Flag]:
+    """
+    Flag any offset language in MODEL sections. The narrative no longer
+    attributes, so an offset in model prose is never backed by the facts.
+    """
     return [
         Flag(section=section.section_type.value, kind=DIRECTION, text=phrase)
         for section in pack.sections if section.drafted_by == MODEL
-        if not has_offsetting_driver(facts, section.section_type.value)
         for phrase in find_direction_phrases(section.narrative)
     ]
 
@@ -724,5 +641,5 @@ def narrate(pack: Pack, *, client=None) -> Pack:
 
     pack.numeric_warnings = numeric_check(pack)
     pack.cause_warnings = cause_check(pack)
-    pack.direction_warnings = direction_check(pack, facts)
+    pack.direction_warnings = direction_check(pack)
     return pack

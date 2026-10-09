@@ -144,6 +144,26 @@ def direction(value: Decimal, against: str, *, places: int = 0) -> str:
     return f"{'above' if value > 0 else 'below'} {against}"
 
 
+# -- What the PDF can print ---------------------------------------------------
+
+def unprintable(text: str) -> list[str]:
+    """
+    Characters in text that the PDF's standard fonts cannot draw (outside
+    the Windows-1252 set they encode), once each, in order. step6 flags
+    them so the reviewer can fix the text before signing; step7 prints '?'
+    only as a last resort.
+    """
+    found: list[str] = []
+    for ch in text:
+        if ch in found:
+            continue
+        try:
+            ch.encode("cp1252")
+        except UnicodeEncodeError:
+            found.append(ch)
+    return found
+
+
 # -- Table cells for the rendered pack (step7) --------------------------------
 # The finance reader's conventions. Values: whole pounds, negatives in
 # brackets. Variance columns are Fav/(Adv): favourable plain, adverse in

@@ -30,6 +30,15 @@ pack is flagged as raised on the reviewer's text (a typo such as £1.46m for
 marked resolved. Cause phrases are not sought in the reviewer's text: the
 reasons are theirs to give.
 
+Before the sign-off summary, every section's final text (template, model
+or reviewer) is checked for characters the PDF font cannot print: each
+becomes a glyph flag, so an approximately-equals sign typed by the reviewer
+is fixed before it reaches the board as a question mark.
+
+record_draft() is the draft-only path: no prompts and no sign-off, but the
+same glyph check and a review audit line marked DRAFT. There is
+deliberately no path that signs without a person.
+
 Sign-off needs a confirm and a reviewer name. A FINAL pack records who and
 when (UTC), and everything outstanding at that moment as acknowledged.
 Otherwise the pack stays DRAFT and nothing is lost. Every run appends one
@@ -49,8 +58,10 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from config import ROOT, VERSION
+from src.formatting import unprintable
 from src.state import (
-    NUMERIC, REVIEWER_TEXT, SUBTOTALS, Flag, Pack, PackStatus, Section,
+    DRAFT_TEXT, GLYPH, NUMERIC, REVIEWER_TEXT, SUBTOTALS, Flag, Pack, PackStatus,
+    Section, SectionType,
 )
 from src.step5_narrate import (
     comparison_set, find_cause_phrases, find_direction_phrases, unmatched_tokens,
@@ -72,29 +83,58 @@ def _utc_now() -> str:
 
 def code_version() -> str:
     """
-    The short git commit of the project if it is a git repository, else
-    config.VERSION. The input hashes reproduce the figures only with the
-    same code: a later fix could change a figure from the same inputs.
+    The short git commit of the project, with "+uncommitted" when the
+    working tree differs from it, or config.VERSION when git is not
+    available. The input hashes reproduce the figures only with the same
+    code: a later fix could change a figure from the same inputs, so a
+    signed pack must name the exact code, and must not claim a commit it
+    was not built from.
     """
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=ROOT, capture_output=True,
+                              text=True, timeout=5)
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
-            capture_output=True, text=True, timeout=5,
-        )
+        head = git("rev-parse", "--short", "HEAD")
+        commit = head.stdout.strip()
+        if head.returncode != 0 or not commit:
+            return VERSION
+        status = git("status", "--porcelain")
     except (OSError, subprocess.SubprocessError):
         return VERSION
-    commit = result.stdout.strip()
-    return commit if result.returncode == 0 and commit else VERSION
+    clean = status.returncode == 0 and not status.stdout.strip()
+    return commit if clean else f"{commit}+uncommitted"
 
 
 # -- Flags during review ------------------------------------------------------
 
 def outstanding_flags(pack: Pack, section: Optional[str] = None) -> list[Flag]:
-    """Unresolved numeric, cause then direction flags, for one section or all."""
-    return [
-        f for f in pack.numeric_warnings + pack.cause_warnings + pack.direction_warnings
-        if not f.resolved and (section is None or f.section == section)
-    ]
+    """Unresolved numeric, cause, direction then glyph flags, for one section or all."""
+    flags = (pack.numeric_warnings + pack.cause_warnings + pack.direction_warnings
+             + pack.glyph_warnings)
+    return [f for f in flags
+            if not f.resolved and (section is None or f.section == section)]
+
+
+def check_glyphs(pack: Pack) -> None:
+    """
+    Flag every character in each section's final text that the PDF font
+    cannot print, resolving earlier glyph flags whose character has gone.
+    A character the reviewer typed is marked as raised on their text.
+    """
+    for section in pack.sections:
+        key = section.section_type.value
+        found = unprintable(section.narrative)
+        open_flags = [f for f in pack.glyph_warnings if f.section == key and not f.resolved]
+        for flag in open_flags:
+            if flag.text not in found:
+                flag.resolved = True
+        flagged = {f.text for f in open_flags if f.text in found}
+        for ch in found:
+            if ch not in flagged:
+                from_reviewer = section.edited and ch not in section.draft
+                pack.glyph_warnings.append(Flag(
+                    section=key, kind=GLYPH, text=ch,
+                    raised_on=REVIEWER_TEXT if from_reviewer else DRAFT_TEXT))
 
 
 def recheck_section(pack: Pack, section: Section, figures: dict) -> None:
@@ -132,7 +172,7 @@ def recheck_section(pack: Pack, section: Section, figures: dict) -> None:
 def signoff_summary(pack: Pack) -> list[str]:
     """
     Everything the reviewer should see before signing: outstanding numeric,
-    cause and direction flags, load, validation and narrate warnings, and a plain
+    cause, direction and glyph flags, load, validation and narrate warnings, and a plain
     statement when the totals exclude rows that could not be loaded.
     """
     summary = [f.message for f in outstanding_flags(pack)]
@@ -183,7 +223,17 @@ def headline_figures(pack: Pack) -> dict:
     return headline
 
 
-def audit_record(pack: Pack, *, run_id: str, timestamp: str, reviewer: str) -> dict:
+def _drivers_record(pack: Pack) -> dict:
+    """The computed drivers of each material subtotal, with their impact on profit."""
+    drivers = pack.section(SectionType.EXEC_SUMMARY).figures["drivers"]
+    return {
+        key: [{"key": d["key"], "name": d["name"], "impact": d["impact"]} for d in lines]
+        for key, lines in drivers.items()
+    }
+
+
+def audit_record(pack: Pack, *, run_id: str, timestamp: str, reviewer: str,
+                 mode: str = "interactive") -> dict:
     """One review run as a JSON-ready dict (Decimals are written as exact strings)."""
     flags = pack.material_flags
     placement = {k: "exec_summary" for k in flags.exec_summary_items}
@@ -193,6 +243,7 @@ def audit_record(pack: Pack, *, run_id: str, timestamp: str, reviewer: str) -> d
     return {
         "run_id": run_id,
         "event": "review",
+        "mode": mode,
         "timestamp": timestamp,
         "code_version": pack.code_version,
         "entity": pack.entity,
@@ -211,6 +262,7 @@ def audit_record(pack: Pack, *, run_id: str, timestamp: str, reviewer: str) -> d
                 {"key": k, "name": pack.item(k)["name"], "placement": placement[k]}
                 for k in flags.all_material
             ],
+            "drivers": _drivers_record(pack),
         },
         "sections": [
             {
@@ -230,6 +282,7 @@ def audit_record(pack: Pack, *, run_id: str, timestamp: str, reviewer: str) -> d
         "numeric_warnings": [_flag_record(f) for f in pack.numeric_warnings],
         "cause_warnings": [_flag_record(f) for f in pack.cause_warnings],
         "direction_warnings": [_flag_record(f) for f in pack.direction_warnings],
+        "glyph_warnings": [_flag_record(f) for f in pack.glyph_warnings],
         "warnings": list(pack.warnings),
         "acknowledged": list(pack.acknowledged),
         "reviewer": reviewer or None,
@@ -272,19 +325,10 @@ def review(
     Raises AlreadySignedOff on a FINAL pack. A blank reviewer cannot sign:
     confirm is not asked, a warning is added and the pack stays DRAFT.
     """
-    if pack.status is PackStatus.FINAL:
-        raise AlreadySignedOff(
-            "This pack is already signed off (FINAL). A signed pack is changed "
-            "by a new run, not by editing."
-        )
-    run_at = _utc_now()
-    pack.run_id = uuid.uuid4().hex
-    pack.code_version = code_version()
+    run_at = _start_run(pack)
     figures = comparison_set(pack)
 
     for section in pack.sections:
-        if not section.draft:
-            section.draft = section.narrative       # what the model or template wrote
         current = section.narrative
         key = section.section_type.value
         answer = ask(section.title, current,
@@ -297,6 +341,7 @@ def review(
     pack.reviewer_edits = {
         s.section_type.value: s.narrative for s in pack.sections if s.edited
     }
+    check_glyphs(pack)
 
     name = (reviewer or "").strip()
     if not name:
@@ -311,5 +356,34 @@ def review(
             pack.acknowledged = summary
 
     record = audit_record(pack, run_id=pack.run_id, timestamp=run_at, reviewer=name)
+    write_audit(record, output_dir)
+    return pack
+
+
+def _start_run(pack: Pack) -> str:
+    """Refuse a FINAL pack, start a new run, keep the first draft text. Returns the run time."""
+    if pack.status is PackStatus.FINAL:
+        raise AlreadySignedOff(
+            "This pack is already signed off (FINAL). A signed pack is changed "
+            "by a new run, not by editing."
+        )
+    pack.run_id = uuid.uuid4().hex
+    pack.code_version = code_version()
+    for section in pack.sections:
+        if not section.draft:
+            section.draft = section.narrative       # what the model or template wrote
+    return _utc_now()
+
+
+def record_draft(pack: Pack, *, output_dir: Path) -> Pack:
+    """
+    The draft-only path: no prompts, nothing edited, no sign-off. Runs the
+    glyph check and appends a review audit line marked DRAFT (mode
+    draft_only), so a draft PDF is still tied to a run in the audit.
+    """
+    run_at = _start_run(pack)
+    check_glyphs(pack)
+    record = audit_record(pack, run_id=pack.run_id, timestamp=run_at, reviewer="",
+                          mode="draft_only")
     write_audit(record, output_dir)
     return pack

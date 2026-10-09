@@ -241,6 +241,7 @@ class Section:
 NUMERIC = "numeric"
 CAUSE = "cause"
 DIRECTION = "direction"
+GLYPH = "glyph"
 DRAFT_TEXT = "draft"
 REVIEWER_TEXT = "reviewer"
 
@@ -250,8 +251,9 @@ class Flag:
     """
     One hit from a soft check, for the reviewer: a figure in the prose that
     matches nothing in the pack (numeric), a phrase in model prose that may
-    state a cause (cause), or offset language in model prose where the facts
-    list no offsetting line (direction). A flag is never a block.
+    state a cause (cause), offset language in model prose, which no longer
+    attributes (direction), or a character the PDF font cannot print
+    (glyph). A flag is never a block.
 
     raised_on says whose text it was found in (the draft or the reviewer's
     edit). resolved means a reviewer's edit removed it; it is kept, not
@@ -267,9 +269,12 @@ class Flag:
     def message(self) -> str:
         if self.kind == NUMERIC:
             msg = f"{self.section}: '{self.text}' matches no figure in the pack"
+        elif self.kind == GLYPH:
+            msg = (f"{self.section}: '{self.text}' (U+{ord(self.text[0]):04X}) cannot be "
+                   f"printed in the PDF font and would appear as '?'")
         elif self.kind == DIRECTION:
-            msg = (f"{self.section}: '{self.text}' describes an offset, but the "
-                   f"facts list no offsetting line")
+            msg = (f"{self.section}: '{self.text}' describes an offset; attribution "
+                   f"belongs to the computed drivers table, not the narrative")
         else:
             msg = f"{self.section}: '{self.text}' may state a cause"
         return msg + (" (in the reviewer's text)" if self.raised_on == REVIEWER_TEXT else "")
@@ -347,6 +352,7 @@ class Pack:
     numeric_warnings: list[Flag] = field(default_factory=list)
     cause_warnings: list[Flag] = field(default_factory=list)
     direction_warnings: list[Flag] = field(default_factory=list)
+    glyph_warnings: list[Flag] = field(default_factory=list)
     reviewer_edits: dict = field(default_factory=dict)
     sign_off_by: str = ""
     sign_off_at: str = ""
