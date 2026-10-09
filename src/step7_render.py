@@ -41,6 +41,7 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
+from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
     KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table,
     TableStyle,
@@ -169,8 +170,8 @@ def _pnl_table(pack: Pack) -> Table:
     add_subtotal("ebit", names["ebit"])
     rows.append(["Gross margin", margin_cell(s.gross_margin_actual),
                  margin_cell(s.gross_margin_budget), margin_cell(s.gross_margin_py),
-                 pts_cell(s.gross_margin_var_budget_pts), "",
-                 pts_cell(s.gross_margin_var_py_pts), ""])
+                 "", pts_cell(s.gross_margin_var_budget_pts),
+                 "", pts_cell(s.gross_margin_var_py_pts)])
     kinds.append(("margin", False))
 
     label_w = 4.3 * cm
@@ -185,13 +186,16 @@ def _pnl_table(pack: Pack) -> Table:
         ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]
+    # Bold means subtotal, always, with a rule above. Materiality is shown only
+    # by the fill and the asterisk, so a material line never looks like a total.
     for i, (kind, material) in enumerate(kinds, start=2):
         if kind == "line":
             style.append(("LEFTPADDING", (0, i), (0, i), 12))
         else:
             style.append(("LINEABOVE", (0, i), (-1, i), 0.4, RULE))
-        if material:
+        if kind == "subtotal":
             style.append(("FONT", (0, i), (-1, i), "Helvetica-Bold", 8))
+        if material:
             style.append(("BACKGROUND", (0, i), (-1, i), MATERIAL_FILL))
     style.append(("LINEBELOW", (0, len(rows) - 2), (-1, len(rows) - 2), 0.8, RULE))
     table = Table(rows, colWidths=[label_w] + [num_w] * 7, repeatRows=2)
@@ -358,17 +362,17 @@ def _story(pack: Pack) -> list:
                          f"the source file that could not be read."), Spacer(1, 6)]
     story += [
         _pnl_table(pack),
-        Spacer(1, 4),
+        _para("Commentary on material lines", _H3),
+        _para(pnl.narrative),
+        Spacer(1, 6),
         _para(f"* Material: a variance against budget of £{table_value(flags.materiality_abs)} "
               f"or {pct(flags.materiality_pct)} or more. The percentage test is not applied "
-              f"across a change of sign. Material rows are in bold.", _SMALL),
+              f"across a change of sign. Material rows are shaded and marked *.", _SMALL),
         _para("Figures are calculated before rounding, so totals and differences may not "
               "add exactly.", _SMALL),
         _para("Fav/(Adv): favourable variances are shown plain and adverse ones in "
               "brackets; for costs an overspend is adverse. n/m: not meaningful, because "
               "the comparator is zero or the sign changed.", _SMALL),
-        Spacer(1, 6),
-        _para(pnl.narrative),
         # Each heading stays on the same page as its table: a header row
         # stranded at the foot of a page reads as a table with no data.
         KeepTogether([
@@ -425,10 +429,34 @@ def _page_decorator(pack: Pack, generated: str):
         canvas.setFont("Helvetica", 7)
         canvas.drawString(MARGIN, 1.0 * cm,
                           _safe(f"{pack.entity}, {pack.period}. Generated {generated}."))
-        canvas.drawRightString(PAGE_W - MARGIN, 1.0 * cm, f"Page {doc.page}")
         canvas.restoreState()
 
     return decorate
+
+
+class _NumberedCanvas(Canvas):
+    """
+    Holds each page until the document is complete, then writes "Page n of
+    N" on every page, so a missing page is obvious. Passes invariant mode
+    through, so a FINAL still renders to identical bytes.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pages: list[dict] = []
+
+    def showPage(self):
+        self._pages.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        total = len(self._pages)
+        for state in self._pages:
+            self.__dict__.update(state)
+            self.setFont("Helvetica", 7)
+            self.drawRightString(PAGE_W - MARGIN, 1.0 * cm, f"Page {self._pageNumber} of {total}")
+            super().showPage()
+        super().save()
 
 
 def _render_pdf(pack: Pack) -> bytes:
@@ -443,7 +471,8 @@ def _render_pdf(pack: Pack) -> bytes:
         invariant=1,
     )
     decorate = _page_decorator(pack, generated)
-    doc.build(_story(pack), onFirstPage=decorate, onLaterPages=decorate)
+    doc.build(_story(pack), onFirstPage=decorate, onLaterPages=decorate,
+              canvasmaker=_NumberedCanvas)
     return buffer.getvalue()
 
 

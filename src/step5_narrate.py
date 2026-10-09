@@ -75,6 +75,11 @@ _PROFIT_SUBTOTALS = {subtotal_key("gross_profit"), subtotal_key("ebit")}
 # the unit itself (cash in pounds, gross margin in %).
 _UNIT_SUFFIX = re.compile(r"\s*\([^)]*\)\s*$")
 
+# A trailing unit made of words, "DSO (days)", which reads better in prose
+# as "48 days". Units with symbols or digits ("%", "GBP 000s") stay in the
+# name: moving them would change how the numeric check reads the figure.
+_WORD_UNIT = re.compile(r"^(?P<name>.*?)\s*\((?P<unit>[A-Za-z][A-Za-z ]*)\)\s*$")
+
 TEMPLATE = "template"
 MODEL = "model"
 
@@ -116,12 +121,19 @@ def _vs_pts(value, against: str):
     return f"{pts(value, dp=MARGIN_DP)} {direction(value, against, places=MARGIN_DP)}"
 
 
-def _vs_number(value, against: str):
+def _with_unit(text: str, unit) -> str:
+    """'48' and 'days' -> '48 days'; '1' and 'days' -> '1 day'; no unit -> '48'."""
+    if not unit:
+        return text
+    return f"{text} {unit[:-1] if text == '1' and unit.endswith('s') else unit}"
+
+
+def _vs_number(value, against: str, unit=None):
     if value is None:
         return None
     if is_nil(value, 1):
         return f"in line with {against}"
-    return f"{number(value)} {direction(value, against, places=1)}"
+    return f"{_with_unit(number(value), unit)} {direction(value, against, places=1)}"
 
 
 def _vs_cash(value, against: str):
@@ -173,15 +185,20 @@ def _kpi_fact(k: dict) -> dict:
     """
     One KPI line. The derived gross margin's comparator is the budget
     margin, so it reads 'below budget', matching the executive summary.
-    The cash KPI is not here: it has its own section.
+    A word unit in the name moves into the prose: "DSO (days)" reads "DSO
+    was 48 days, 6 days above target". The cash KPI is not here: it has
+    its own section.
     """
     if k["derived"]:
         label, value = _UNIT_SUFFIX.sub("", k["metric"]), (
             None if k["actual"] is None else pct(k["actual"], dp=MARGIN_DP))
         vs_target, vs_py = _vs_pts(k["delta_target"], "budget"), _vs_pts(k["delta_py"], "last year")
     else:
-        label, value = k["metric"], None if k["actual"] is None else number(k["actual"])
-        vs_target, vs_py = _vs_number(k["delta_target"], "target"), _vs_number(k["delta_py"], "last year")
+        m = _WORD_UNIT.match(k["metric"])
+        label, unit = (m["name"], m["unit"]) if m else (k["metric"], None)
+        value = None if k["actual"] is None else _with_unit(number(k["actual"]), unit)
+        vs_target = _vs_number(k["delta_target"], "target", unit)
+        vs_py = _vs_number(k["delta_py"], "last year", unit)
     return {"name": label, "derived": k["derived"], "value": value,
             "vs_target": vs_target, "vs_last_year": vs_py}
 

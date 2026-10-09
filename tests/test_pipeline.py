@@ -1287,10 +1287,34 @@ class TestNarrateTemplate:
     def test_kpi_lines(self, narrated):
         assert narrated.section(SectionType.KPIS).narrative.split("\n") == [
             "Headcount was 214, 9 above target and 16 above last year.",
-            "DSO (days) was 48, 6 above target and 3 above last year.",
+            "DSO was 48 days, 6 days above target and 3 days above last year.",
             "Gross margin, taken from the P&L, was 35.0%, 4.1 pts below budget "
             "and 3.7 pts below last year.",
         ]
+
+    def test_kpi_word_units_move_into_the_prose(self):
+        from src.step5_narrate import narrate
+        kpis = [
+            Kpi(metric="Order lead time (days)", actual=Decimal("12"), target=Decimal("11"),
+                prior_year=Decimal("13")),
+            Kpi(metric="Staff turnover (%)", actual=Decimal("12"), target=Decimal("10"),
+                prior_year=Decimal("12")),
+            Kpi(metric="Cash balance (GBP 000s)", actual=Decimal("1176"),
+                target=Decimal("1350"), prior_year=Decimal("1288")),
+        ]
+        p = narrate(_assemble_lines(_clean_pnl(), kpis))
+        lines = p.section(SectionType.KPIS).narrative.splitlines()
+        assert lines[0] == ("Order lead time was 12 days, 1 day above target and "
+                            "1 day below last year.")
+        assert lines[1] == ("Staff turnover (%) was 12, 2 above target and in line "
+                            "with last year.")
+        assert p.numeric_warnings == []
+
+    def test_kpi_units_reach_the_prompt_too(self):
+        from src.step5_narrate import build_prompt, narrative_facts
+        p = _assemble_sample()
+        _, user = build_prompt(narrative_facts(p), p.entity, p.period)
+        assert "DSO: 48 days; 6 days above target; 3 days above last year." in user
 
     def test_cash_in_pounds(self, narrated):
         text = narrated.section(SectionType.CASH).narrative
@@ -2003,6 +2027,11 @@ class TestAuditAdditions:
         assert [l["run_id"] for l in _audit_lines(tmp_path)] == [first, p.run_id]
 
 
+def render_pdf(pack):
+    from src.step7_render import render
+    return render(pack)
+
+
 # ── RENDER ────────────────────────────────────────────────────────────
 
 def _pdf_pages(data):
@@ -2238,6 +2267,49 @@ class TestRender:
         assert rendered["pdf_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
         assert rendered["run_id"] == review_line["run_id"] == p.run_id
         assert datetime.fromisoformat(rendered["timestamp"]).utcoffset() == timedelta(0)
+
+    # -- Layout polish ------------------------------------------------------------
+
+    def _pnl_table(self, pack):
+        from src.step7_render import _pnl_table
+        table = _pnl_table(pack)
+        labels = [row[0] for row in table._cellvalues]
+        return table, labels
+
+    def test_bold_means_subtotal_not_material(self, final_pack):
+        table, labels = self._pnl_table(final_pack)
+        font = {label: table._cellStyles[i][0].fontname for i, label in enumerate(labels)}
+        for subtotal in ("Revenue *", "COGS", "Gross profit *", "Opex", "EBIT *"):
+            assert font[subtotal] == "Helvetica-Bold", subtotal
+        for line in ("Retail *", "Marketing *", "Export *", "Food service", "Ingredients"):
+            assert font[line] == "Helvetica", line
+
+    def test_materiality_is_shown_by_fill_and_asterisk(self, final_pack):
+        from src.step7_render import MATERIAL_FILL
+        table, labels = self._pnl_table(final_pack)
+        filled = {labels[cmd[1][1]] for cmd in table._bkgrndcmds
+                  if cmd[0] == "BACKGROUND" and cmd[3] == MATERIAL_FILL}
+        assert filled == {"Retail *", "Export *", "Revenue *", "Gross profit *",
+                          "Marketing *", "EBIT *"}
+        assert "Material rows are shaded and marked *." in _flat(_pdf_pages(render_pdf(final_pack)))
+
+    def test_margin_points_sit_in_the_percentage_columns(self, final_pack):
+        table, _ = self._pnl_table(final_pack)
+        assert table._cellvalues[-1] == ["Gross margin", "35.0%", "39.1%", "38.7%",
+                                         "", "(4.1 pts)", "", "(3.7 pts)"]
+        assert table._cellvalues[1][5] == table._cellvalues[1][7] == "%"
+
+    def test_commentary_has_a_heading_before_the_notes(self, final_pdf):
+        text = _flat(_pdf_pages(final_pdf))
+        heading = text.index("Commentary on material lines")
+        assert text.index("Gross margin 35.0%") < heading < text.index("Retail was £1.64m")
+        assert text.index("Retail was £1.64m") < text.index("* Material:")
+
+    def test_page_numbers_show_the_total(self, final_pdf, draft_pdf):
+        for data in (final_pdf, draft_pdf):
+            pages = _pdf_pages(data)
+            for n, page in enumerate(pages, start=1):
+                assert f"Page {n} of {len(pages)}" in page
 
     # -- The computed drivers block -------------------------------------------
 
