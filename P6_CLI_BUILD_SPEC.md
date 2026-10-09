@@ -1,4 +1,4 @@
-# Project 6 CLI build spec: Agentic Board Pack Generator
+# Project 6 CLI build spec: Board Pack Generator
 
 The build order for the CLI core, from the locked PROJECT_6_SCOPE.md. main.py first, seven phases
 as tested modules, headless from the start so the web layer reuses the engine, exactly as P5 was

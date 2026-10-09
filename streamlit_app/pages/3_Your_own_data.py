@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from config import CASH_KPI_METRIC, CASH_KPI_SCALE, GROSS_MARGIN_KPI_METRIC
+from config import CASH_KPI_METRIC, CASH_KPI_SCALE, GROSS_MARGIN_KPI_METRIC, REPO_URL
 from src.pipeline import (
     CASH_REVENUE_MULTIPLE, CASH_UNITS, CATEGORIES, KPI_COLUMNS, MAX_NAME_LENGTH,
     OPTIONAL_KPI_COLUMNS, PNL_COLUMNS, SIGN_WORD, row_handling,
@@ -131,14 +131,17 @@ st.page_link("pages/4_How_its_built.py",
 
 st.markdown("#### Running locally")
 st.markdown(
-    "To keep your files and your key on your own machine, run the project locally. Clone or "
-    "download the repository, then from its folder:")
-st.code("pip install -r requirements.txt\n"
+    "To keep your files and your key on your own machine, run the project locally, from "
+    f"its repository at [{REPO_URL.removeprefix('https://')}]({REPO_URL}):")
+st.code(f"git clone {REPO_URL}.git\n"
+        f"cd {REPO_URL.rsplit('/', 1)[-1]}\n"
+        "pip install -r requirements.txt\n"
         "python main.py --draft-only\n"
         "python main.py\n"
         "streamlit run streamlit_app/Home.py", language=None)
 st.markdown(
-    "The first command installs the requirements. `python main.py --draft-only` builds a "
+    "The first two commands copy the repository and enter its folder; the third installs the "
+    "requirements. `python main.py --draft-only` builds a "
     "DRAFT of the sample with its review notes. `python main.py` takes you through the "
     f"review in the terminal and asks for your name and {SIGN_WORD}. The last command runs "
     "this app on your machine.")

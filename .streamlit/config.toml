@@ -3,3 +3,15 @@
 # the palette, and test_web checks this value matches its INK.
 [theme]
 primaryColor = "#1E2A2E"
+
+# Visitors see the app, not the developer menu or the Deploy button.
+[client]
+toolbarMode = "minimal"
+
+# The upload limit the pages state (1 MB a file), enforced by the server too;
+# lib/inputs.py checks it again with a plain message.
+[server]
+maxUploadSize = 1
+
+[browser]
+gatherUsageStats = false

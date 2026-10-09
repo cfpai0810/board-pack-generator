@@ -2,7 +2,7 @@
 # config.py: Layer 1: paths, materiality thresholds, entity metadata
 # =============================================================================
 """
-Project-level configuration for the Agentic Board Pack Generator.
+Project-level configuration for the Board Pack Generator.
 
 Materiality thresholds TA and TP are module-level constants so they are
 trivially made adjustable later (the P5 pattern). Paths resolve relative
@@ -80,7 +80,11 @@ DIRECTION_PHRASES = (
 # the project is a git repository; otherwise this constant. Bump it whenever
 # a change could alter a figure or the narrative from the same inputs.
 
-VERSION = "0.7.0"
+VERSION = "1.0.0"
+
+# -- The repository -------------------------------------------------------------
+
+REPO_URL = "https://github.com/cfpai0810/board-pack-generator"
 
 # -- Entity and period metadata -----------------------------------------------
 

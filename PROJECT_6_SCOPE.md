@@ -1,4 +1,4 @@
-# Project 6 scope: Agentic Board Pack Generator
+# Project 6 scope: Board Pack Generator
 
 First full scope, built from the confirmed first-pass decisions. This is the document the engineer
 would build a CLI from, in the same shape as PROJECT_5_SCOPE. It inherits every standing standard
@@ -11,7 +11,7 @@ bring-your-own-key. House rules: British, no dashes.
 
 ## 1. What it is, and why it is distinct
 
-The Agentic Board Pack Generator assembles a monthly management pack from the underlying numbers:
+The Board Pack Generator assembles a monthly management pack from the underlying numbers:
 the deterministic figures produced by code, and the narrative drafted by the model for human
 review. v1 is a management pack with a board-ready executive summary layered on top, the same
 computed numbers narrated up a level.

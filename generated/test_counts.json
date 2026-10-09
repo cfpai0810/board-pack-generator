@@ -1,9 +1,9 @@
 {
   "written_by": "tests/conftest.py, after a full passing run of the suite",
-  "total": 552,
+  "total": 553,
   "by_suite": {
     "engine": 475,
-    "web": 77
+    "web": 78
   },
   "by_area": [
     {
@@ -52,7 +52,7 @@
     },
     {
       "area": "Web app: review stage",
-      "tests": 35
+      "tests": 36
     },
     {
       "area": "Web app: own files and the model",
@@ -99,7 +99,7 @@
     "TestTestCounts": 3,
     "TestUploadHandling": 7,
     "TestValidate": 15,
-    "TestWebLayerBoundary": 6,
+    "TestWebLayerBoundary": 7,
     "TestWorkedExample": 8,
     "TestWorkedExampleTab": 3
   }

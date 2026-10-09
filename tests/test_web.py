@@ -382,6 +382,16 @@ class TestWebLayerBoundary:
         theme = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))
         assert theme["theme"]["primaryColor"] == INK
 
+    def test_the_hosted_app_matches_what_the_pages_state(self):
+        # The server's upload limit is the one page 3 states, and visitors get no
+        # developer toolbar or Deploy button.
+        import tomllib
+        from streamlit_app.lib.inputs import MAX_MB
+        config = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))
+        assert config["server"]["maxUploadSize"] == MAX_MB
+        assert config["client"]["toolbarMode"] == "minimal"
+        assert not (ROOT / ".streamlit" / "secrets.toml").exists()
+
     def test_the_key_never_reaches_a_file(self, monkeypatch):
         # Privacy: the key lives in session state only. After a model run, no
         # file the session wrote (the PDF, the audit lines) contains it.
