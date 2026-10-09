@@ -2567,3 +2567,73 @@ class TestMain:
             lines = [l.strip() for l in (ROOT / name).read_text(encoding="utf-8").splitlines()
                      if l.strip() and not l.startswith("#") and not l.startswith("-r")]
             assert lines and all("==" in l for l in lines), name
+
+
+# ── SHARED TABLES AND THE LIVE TEXT CHECK ─────────────────────────────
+
+class TestSharedTables:
+    def test_pnl_rows_are_finished_strings_in_board_order(self, pack):
+        from src.tables import pnl_rows
+        rows = pnl_rows(pack)
+        assert [r.label for r in rows] == [
+            "Retail *", "Food service", "Export *", "Revenue *",
+            "Ingredients", "Packaging", "Production labour", "COGS", "Gross profit *",
+            "Marketing *", "Personnel", "Logistics", "Facilities", "IT and admin",
+            "Opex", "EBIT *", "Gross margin"]
+        assert all(isinstance(c, str) for r in rows for c in r.cells)
+        assert rows[15].cells == ("(46,120)", "147,000", "100,810", "(193,120)", "n/m",
+                                  "(146,930)", "n/m")
+        assert rows[-1].cells == ("35.0%", "39.1%", "38.7%", "", "(4.1 pts)", "", "(3.7 pts)")
+
+    def test_pnl_row_kinds_and_materiality(self, pack):
+        from src.tables import LINE, MARGIN, SUBTOTAL, pnl_rows
+        rows = {r.label: r for r in pnl_rows(pack)}
+        assert rows["COGS"].kind == SUBTOTAL and not rows["COGS"].material
+        assert rows["Marketing *"].kind == LINE and rows["Marketing *"].material
+        assert rows["Gross margin"].kind == MARGIN
+
+    def test_drivers_rows(self, pack):
+        from src.tables import drivers_rows
+        assert [(r.subtotal, r.line, r.impact) for r in drivers_rows(pack)] == [
+            ("Gross profit", "Retail", "(56,180)"), ("", "Ingredients", "(37,310)"),
+            ("", "Export", "(28,810)"), ("EBIT", "Retail", "(56,180)"),
+            ("", "Marketing", "(37,640)"), ("", "Ingredients", "(37,310)")]
+
+    def test_the_pdf_draws_the_shared_rows(self, final_pack):
+        from src.step7_render import _pnl_table
+        from src.tables import pnl_rows
+        body = _pnl_table(final_pack)._cellvalues[2:]
+        assert body == [[r.label, *r.cells] for r in pnl_rows(final_pack)]
+
+
+class TestCheckText:
+    def test_clean_draft_text_has_no_flags(self, narrated):
+        from src.step6_review import check_text
+        for section in narrated.sections:
+            assert check_text(narrated, section.section_type.value, section.narrative) == []
+
+    def test_typo_and_unprintable_character_are_flagged_as_reviewer_text(self, narrated):
+        from src.step6_review import check_text
+        text = narrated.section(SectionType.PNL).narrative.replace("£1.64m", "£1.46m")
+        flags = check_text(narrated, "pnl", text + " Cost \u2248 £20k.")
+        assert [(f.kind, f.text, f.raised_on) for f in flags] == [
+            ("numeric", "£1.46m", "reviewer"), ("numeric", "£20k", "reviewer"),
+            ("glyph", "\u2248", "reviewer")]
+
+    def test_a_token_already_in_the_model_draft_is_marked_draft(self, tmp_path):
+        from src.step6_review import check_text, record_draft
+        p = _narrated_sample(client=FakeClient(json.dumps(dict(
+            MODEL_SECTIONS, exec_summary="Revenue was £3.1m."))))
+        record_draft(p, output_dir=tmp_path)
+        flags = check_text(p, "exec_summary", "Revenue was £3.1m, and £9k more.")
+        assert [(f.text, f.raised_on) for f in flags] == [("£3.1m", "draft"), ("£9k", "reviewer")]
+
+    def test_labels_and_the_period_are_not_figures(self, narrated):
+        from src.step6_review import check_text
+        assert check_text(narrated, "exec_summary", "In June 2026 Harmwell Foods Ltd met.") == []
+
+    def test_check_text_leaves_the_pack_unchanged(self, narrated):
+        from src.step6_review import check_text
+        before = copy.deepcopy(narrated)
+        check_text(narrated, "cash", "Cash was £1,176 \u2192 low.")
+        assert narrated == before

@@ -169,6 +169,35 @@ def recheck_section(pack: Pack, section: Section, figures: dict) -> None:
     )
 
 
+def check_text(pack: Pack, section: str, text: str) -> list[Flag]:
+    """
+    The numeric and glyph checks on a piece of text for one section, as
+    flags, without changing the pack. This is what a reviewer's screen calls
+    to show flags live while they edit: the same unmatched_tokens and
+    unprintable checks review() applies, so no display layer ever
+    re-implements one.
+
+    section is the section's key ("exec_summary", "pnl", "kpis", "cash").
+    A flag whose token or character is already in that section's draft
+    (what the model or template wrote) is marked as raised on the draft;
+    anything new is raised on the reviewer's text. Cause and direction
+    phrases are not sought: they are checked only in model prose.
+    """
+    target = next(s for s in pack.sections if s.section_type.value == section)
+    draft = target.draft or target.narrative
+    origin = lambda found_in_draft: DRAFT_TEXT if found_in_draft else REVIEWER_TEXT
+    flags = [
+        Flag(section=section, kind=NUMERIC, text=token,
+             raised_on=origin(token in unmatched_tokens(draft, pack)))
+        for token in unmatched_tokens(text, pack)
+    ]
+    flags += [
+        Flag(section=section, kind=GLYPH, text=ch, raised_on=origin(ch in draft))
+        for ch in unprintable(text)
+    ]
+    return flags
+
+
 def signoff_summary(pack: Pack) -> list[str]:
     """
     Everything the reviewer should see before signing: outstanding numeric,

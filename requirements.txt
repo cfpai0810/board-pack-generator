@@ -1,6 +1,9 @@
 # Running the board pack generator (python main.py)
 reportlab==5.0.0
 
+# The web app (streamlit run streamlit_app/Home.py)
+streamlit==1.60.0
+
 # Only for --use-model: the model client, and reading ANTHROPIC_API_KEY from a local .env
 anthropic==0.116.0
 python-dotenv==1.2.2

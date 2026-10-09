@@ -48,20 +48,23 @@ from reportlab.platypus import (
 )
 
 from src.formatting import (
-    cash_pounds, fav_adv, fav_adv_pct, margin_cell, pct, pts_cell,
-    table_number, table_value,
+    cash_pounds, margin_cell, pct, pts_cell, table_number, table_value,
 )
-from src.state import SUBTOTALS, Category, Pack, PackStatus, SectionType, subtotal_key
+from src.state import Pack, PackStatus, SectionType
 from src.step5_narrate import TEMPLATE, clean_dashes
 from src.step6_review import _utc_now, signoff_summary, write_audit
+from src.tables import (
+    DRAFT_HEX, DRIVERS_HEADER, FINAL_HEX, LINE, MATERIAL_HEX, PNL_HEADER, RULE_HEX,
+    SUBTOTAL, drivers_rows, pnl_rows,
+)
 
 # -- Look: colour only for status and materiality -----------------------------
 
-DRAFT_FILL = colors.HexColor("#B45F06")
-FINAL_FILL = colors.HexColor("#2E6B3F")
-MATERIAL_FILL = colors.HexColor("#FFF2CC")
+DRAFT_FILL = colors.HexColor(DRAFT_HEX)
+FINAL_FILL = colors.HexColor(FINAL_HEX)
+MATERIAL_FILL = colors.HexColor(MATERIAL_HEX)
 WATERMARK = colors.Color(0.87, 0.87, 0.87)
-RULE = colors.HexColor("#808080")
+RULE = colors.HexColor(RULE_HEX)
 
 MARGIN = 1.8 * cm
 PAGE_W, PAGE_H = A4
@@ -77,11 +80,6 @@ _H3 = ParagraphStyle("h3", parent=_BASE, fontName="Helvetica-Bold", fontSize=9.5
 _BANNER = ParagraphStyle("banner", parent=_BASE, fontName="Helvetica-Bold", fontSize=11,
                          textColor=colors.white, alignment=TA_CENTER)
 
-_COST_PREFIXES = {"cogs", "opex"}
-
-# Subtotals whose drivers are tabulated: the ones that span categories, so
-# the table says which side of the P&L moved them.
-_ATTRIBUTED = (subtotal_key("gross_profit"), subtotal_key("ebit"))
 _LEGAL_SUFFIXES = {"ltd", "limited", "plc", "llp", "inc", "llc"}
 
 
@@ -120,59 +118,11 @@ def _titled(pack: Pack, note: str) -> str:
 
 # -- The P&L table ------------------------------------------------------------
 
-def _pnl_row(label, actual, budget, py, var_b, pct_b, var_py, pct_py, *, cost, material):
-    return [
-        f"{label} *" if material else label,
-        table_value(actual), table_value(budget), table_value(py),
-        fav_adv(var_b, cost=cost), fav_adv_pct(pct_b, actual, budget, cost=cost),
-        fav_adv(var_py, cost=cost), fav_adv_pct(pct_py, actual, py, cost=cost),
-    ]
-
-
 def _pnl_table(pack: Pack) -> Table:
-    s = pack.subtotals
-    material_subtotals = set(pack.material_flags.material_subtotals)
-    rows = [
-        ["", "Actual", "Budget", "Prior year", "Fav/(Adv) vs budget", "",
-         "Fav/(Adv) vs prior year", ""],
-        ["", "£", "£", "£", "£", "%", "£", "%"],
-    ]
-    kinds: list[tuple[str, bool]] = []          # (line or subtotal, material) per body row
-
-    def add_lines(category: Category) -> None:
-        for line in pack.pnl_lines:
-            if line.category is category:
-                rows.append(_pnl_row(
-                    line.line_item, line.actuals, line.budget, line.prior_year,
-                    line.var_budget_abs, line.var_budget_pct,
-                    line.var_py_abs, line.var_py_pct,
-                    cost=category is not Category.REVENUE, material=line.is_material))
-                kinds.append(("line", line.is_material))
-
-    def add_subtotal(prefix: str, name: str) -> None:
-        material = subtotal_key(prefix) in material_subtotals
-        rows.append(_pnl_row(
-            name, getattr(s, f"{prefix}_actual"), getattr(s, f"{prefix}_budget"),
-            getattr(s, f"{prefix}_py"),
-            getattr(s, f"{prefix}_var_budget_abs"), getattr(s, f"{prefix}_var_budget_pct"),
-            getattr(s, f"{prefix}_var_py_abs"), getattr(s, f"{prefix}_var_py_pct"),
-            cost=prefix in _COST_PREFIXES, material=material))
-        kinds.append(("subtotal", material))
-
-    names = dict(SUBTOTALS)
-    add_lines(Category.REVENUE)
-    add_subtotal("revenue", names["revenue"])
-    add_lines(Category.COGS)
-    add_subtotal("cogs", names["cogs"])
-    add_subtotal("gross_profit", names["gross_profit"])
-    add_lines(Category.OPEX)
-    add_subtotal("opex", names["opex"])
-    add_subtotal("ebit", names["ebit"])
-    rows.append(["Gross margin", margin_cell(s.gross_margin_actual),
-                 margin_cell(s.gross_margin_budget), margin_cell(s.gross_margin_py),
-                 "", pts_cell(s.gross_margin_var_budget_pts),
-                 "", pts_cell(s.gross_margin_var_py_pts)])
-    kinds.append(("margin", False))
+    """The P&L table, drawn from src.tables.pnl_rows: the same cells the web layer shows."""
+    rows = pnl_rows(pack)
+    data = [list(PNL_HEADER[0]), list(PNL_HEADER[1])]
+    data += [[_safe(row.label), *row.cells] for row in rows]
 
     label_w = 4.3 * cm
     num_w = (BODY_W - label_w) / 7
@@ -188,17 +138,17 @@ def _pnl_table(pack: Pack) -> Table:
     ]
     # Bold means subtotal, always, with a rule above. Materiality is shown only
     # by the fill and the asterisk, so a material line never looks like a total.
-    for i, (kind, material) in enumerate(kinds, start=2):
-        if kind == "line":
+    for i, row in enumerate(rows, start=2):
+        if row.kind == LINE:
             style.append(("LEFTPADDING", (0, i), (0, i), 12))
         else:
             style.append(("LINEABOVE", (0, i), (-1, i), 0.4, RULE))
-        if kind == "subtotal":
+        if row.kind == SUBTOTAL:
             style.append(("FONT", (0, i), (-1, i), "Helvetica-Bold", 8))
-        if material:
+        if row.material:
             style.append(("BACKGROUND", (0, i), (-1, i), MATERIAL_FILL))
-    style.append(("LINEBELOW", (0, len(rows) - 2), (-1, len(rows) - 2), 0.8, RULE))
-    table = Table(rows, colWidths=[label_w] + [num_w] * 7, repeatRows=2)
+    style.append(("LINEBELOW", (0, len(data) - 2), (-1, len(data) - 2), 0.8, RULE))
+    table = Table(data, colWidths=[label_w] + [num_w] * 7, repeatRows=2)
     table.setStyle(TableStyle(style))
     return table
 
@@ -214,14 +164,11 @@ def _drivers_block(pack: Pack) -> list:
     plain. Computed, not drafted, and not editable at review: attribution
     is arithmetic, which the live model runs could not convey reliably.
     """
-    drivers = pack.section(SectionType.EXEC_SUMMARY).figures["drivers"]
-    rows = [["Subtotal", "Line", "Impact on profit"], ["", "", "Fav/(Adv) £"]]
-    for key in _ATTRIBUTED:
-        for i, d in enumerate(drivers.get(key, [])):
-            rows.append([pack.item(key)["name"] if i == 0 else "", _safe(d["name"]),
-                         fav_adv(d["impact"], cost=False)])
-    if len(rows) == 2:
+    driver_rows = drivers_rows(pack)
+    if not driver_rows:
         return []
+    rows = [list(DRIVERS_HEADER[0]), list(DRIVERS_HEADER[1])]
+    rows += [[r.subtotal, _safe(r.line), r.impact] for r in driver_rows]
     table = Table(rows, colWidths=[3.6 * cm, 4.6 * cm, 3.4 * cm], hAlign="LEFT")
     table.setStyle(TableStyle([
         ("FONT", (0, 0), (-1, -1), "Helvetica", 8),
