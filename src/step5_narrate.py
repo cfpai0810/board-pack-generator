@@ -65,8 +65,10 @@ from src.formatting import (
     cash_pounds, direction, is_nil, number, pct, profit_phrase, prose_cash,
     prose_money, pts, sign_change,
 )
+from src import notes
 from src.state import (
-    CAUSE, DIRECTION, NUMERIC, SUBTOTALS, Flag, Pack, SectionType, subtotal_key,
+    CAUSE, DIRECTION, NUMERIC, SECTION_TITLES, SUBTOTALS, Flag, Pack, SectionType,
+    subtotal_key,
 )
 
 _PROFIT_SUBTOTALS = {subtotal_key("gross_profit"), subtotal_key("ebit")}
@@ -136,8 +138,8 @@ def _vs_number(value, against: str, unit=None):
     return f"{_with_unit(number(value), unit)} {direction(value, against, places=1)}"
 
 
-def _vs_cash(value, against: str):
-    return None if value is None else _vs_money(cash_pounds(value), against)
+def _vs_cash(value, against: str, scale):
+    return None if value is None else _vs_money(cash_pounds(value, scale), against)
 
 
 # -- Facts: every figure the narrative may use, formatted once ----------------
@@ -224,9 +226,9 @@ def narrative_facts(pack: Pack) -> dict:
     if cash_figures["supplied"]:
         cash = {
             "supplied": True,
-            "value": prose_cash(cash_figures["actual"]),
-            "vs_target": _vs_cash(cash_figures["delta_target"], "target"),
-            "vs_last_year": _vs_cash(cash_figures["delta_py"], "last year"),
+            "value": prose_cash(cash_figures["actual"], pack.cash_scale),
+            "vs_target": _vs_cash(cash_figures["delta_target"], "target", pack.cash_scale),
+            "vs_last_year": _vs_cash(cash_figures["delta_py"], "last year", pack.cash_scale),
         }
     else:
         cash = {"supplied": False, "note": cash_figures["note"]}
@@ -425,26 +427,25 @@ def clean_dashes(text: str) -> str:
 
 def _model_drafts(client, facts: dict, pack: Pack) -> tuple[dict[str, str], list[str]]:
     """Ask the model; return (drafts by section, warnings). Never raises."""
-    everything = "so every section uses the template"
     system, user = build_prompt(facts, pack.entity, pack.period)
     try:
         response = call_model(client, system, user)
     except Exception as e:  # any failure degrades to the template
-        return {}, [f"narrate: the model call failed ({type(e).__name__}), {everything}"]
+        return {}, [notes.model_failed(type(e).__name__)]
 
     pack.narrative_model = response.model
     pack.narrative_input_tokens = response.usage.input_tokens
     pack.narrative_output_tokens = response.usage.output_tokens
 
     if response.stop_reason == "refusal":
-        return {}, [f"narrate: the model declined the request, {everything}"]
+        return {}, [notes.model_declined()]
     text = next((b.text for b in response.content if b.type == "text"), "")
     try:
         data = json.loads(text)
     except ValueError:
         data = None
     if not isinstance(data, dict):
-        return {}, [f"narrate: the model response was not valid JSON, {everything}"]
+        return {}, [notes.model_unreadable()]
 
     drafts, warnings = {}, []
     for section_type in SectionType:
@@ -452,10 +453,7 @@ def _model_drafts(client, facts: dict, pack: Pack) -> tuple[dict[str, str], list
         if isinstance(value, str) and value.strip():
             drafts[section_type.value] = clean_dashes(value.strip())
         else:
-            warnings.append(
-                f"narrate ({section_type.value}): missing from the model response, "
-                f"so the template was used"
-            )
+            warnings.append(notes.model_missing(SECTION_TITLES[section_type.value]))
     return drafts, warnings
 
 
@@ -506,7 +504,7 @@ def comparison_set(pack: Pack) -> dict[str, set[Decimal]]:
             add(percent, k.actual, k.target, k.prior_year)
             add(points, k.delta_target, k.delta_py)
         elif k.metric == cash_metric:
-            add(money, *(cash_pounds(v) for v in values if v is not None))
+            add(money, *(cash_pounds(v, pack.cash_scale) for v in values if v is not None))
         else:
             add(plain, *values)
 

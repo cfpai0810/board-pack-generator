@@ -193,6 +193,12 @@ def _report(result: PipelineResult, say) -> None:
         say("Status: DRAFT (not signed off)")
     say(f"PDF: {result.pdf_path}")
     say(f"Audit: {result.audit_path}")
+    if result.data_notes:
+        say("Data notes:")
+        for i, note in enumerate(result.data_notes, start=1):
+            say(textwrap.fill(f"{i}. {note}", WIDTH, subsequent_indent="   "))
+    else:
+        say("Data notes: none")
     kinds = (("numeric", pack.numeric_warnings), ("cause", pack.cause_warnings),
              ("direction", pack.direction_warnings), ("glyph", pack.glyph_warnings))
     counts = ", ".join(f"{name} {sum(not f.resolved for f in flags)}" for name, flags in kinds)

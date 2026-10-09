@@ -42,6 +42,10 @@ from decimal import ROUND_HALF_EVEN, Context, Decimal, localcontext
 from typing import NamedTuple, Optional
 
 from config import GROSS_MARGIN_KPI_METRIC
+from src.notes import (
+    line_subject, margin_not_shown, margin_row_ignored, subtotal_subject, zero_comparator,
+    zero_revenue,
+)
 from src.state import Category, Kpi, PnlLine, Subtotals
 
 _ZERO = Decimal("0")
@@ -78,18 +82,18 @@ def safe_pct(numerator: Decimal, denominator: Decimal) -> Optional[Decimal]:
 def _variance(
     actual: Decimal,
     comparator: Decimal,
-    name: str,
+    subject: str,
     against: str,
     notes: list[str],
 ) -> tuple[Decimal, Optional[Decimal]]:
-    """Return (actual minus comparator, that as a % of comparator), noting a zero comparator."""
+    """
+    Return (actual minus comparator, that as a % of comparator), noting a
+    zero comparator. subject names the line or subtotal for the note.
+    """
     diff = actual - comparator
     pct = safe_pct(diff, comparator)
     if pct is None:
-        notes.append(
-            f"pnl ({name}): {against} is zero, so the % variance "
-            f"vs {against} is not meaningful"
-        )
+        notes.append(zero_comparator(subject, against))
     return diff, pct
 
 
@@ -105,10 +109,10 @@ def compute_line_variances(pnl_lines: list[PnlLine]) -> list[str]:
     notes: list[str] = []
     for line in pnl_lines:
         line.var_budget_abs, line.var_budget_pct = _variance(
-            line.actuals, line.budget, line.line_item, "budget", notes,
+            line.actuals, line.budget, line_subject(line.line_item), "budget", notes,
         )
         line.var_py_abs, line.var_py_pct = _variance(
-            line.actuals, line.prior_year, line.line_item, "prior year", notes,
+            line.actuals, line.prior_year, line_subject(line.line_item), "prior year", notes,
         )
     return notes
 
@@ -125,10 +129,6 @@ def _column_sums(
         sum((line.budget for line in lines), _ZERO),
         sum((line.prior_year for line in lines), _ZERO),
     )
-
-
-def _and_join(items: list[str]) -> str:
-    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
 
 
 def compute_subtotals(pnl_lines: list[PnlLine]) -> tuple[Subtotals, list[str]]:
@@ -159,48 +159,44 @@ def compute_subtotals(pnl_lines: list[PnlLine]) -> tuple[Subtotals, list[str]]:
         gross_margin_py=safe_pct(gp_p, rev_p),
     )
 
-    zero_revenue = [
+    zero_columns = [
         column for column, revenue
         in (("actual", rev_a), ("budget", rev_b), ("prior year", rev_p))
         if revenue == _ZERO
     ]
-    if zero_revenue:
-        those = "that column" if len(zero_revenue) == 1 else "those columns"
-        notes.append(
-            f"pnl: revenue is zero ({_and_join(zero_revenue)}), "
-            f"so gross margin cannot be computed for {those}"
-        )
+    if zero_columns:
+        notes.append(zero_revenue(zero_columns))
 
     s.revenue_var_budget_abs, s.revenue_var_budget_pct = _variance(
-        s.revenue_actual, s.revenue_budget, "Revenue subtotal", "budget", notes,
+        s.revenue_actual, s.revenue_budget, subtotal_subject("Revenue"), "budget", notes,
     )
     s.cogs_var_budget_abs, s.cogs_var_budget_pct = _variance(
-        s.cogs_actual, s.cogs_budget, "COGS subtotal", "budget", notes,
+        s.cogs_actual, s.cogs_budget, subtotal_subject("COGS"), "budget", notes,
     )
     s.gross_profit_var_budget_abs, s.gross_profit_var_budget_pct = _variance(
-        s.gross_profit_actual, s.gross_profit_budget, "Gross profit", "budget", notes,
+        s.gross_profit_actual, s.gross_profit_budget, subtotal_subject("Gross profit"), "budget", notes,
     )
     s.opex_var_budget_abs, s.opex_var_budget_pct = _variance(
-        s.opex_actual, s.opex_budget, "Opex subtotal", "budget", notes,
+        s.opex_actual, s.opex_budget, subtotal_subject("Opex"), "budget", notes,
     )
     s.ebit_var_budget_abs, s.ebit_var_budget_pct = _variance(
-        s.ebit_actual, s.ebit_budget, "EBIT", "budget", notes,
+        s.ebit_actual, s.ebit_budget, subtotal_subject("EBIT"), "budget", notes,
     )
 
     s.revenue_var_py_abs, s.revenue_var_py_pct = _variance(
-        s.revenue_actual, s.revenue_py, "Revenue subtotal", "prior year", notes,
+        s.revenue_actual, s.revenue_py, subtotal_subject("Revenue"), "prior year", notes,
     )
     s.cogs_var_py_abs, s.cogs_var_py_pct = _variance(
-        s.cogs_actual, s.cogs_py, "COGS subtotal", "prior year", notes,
+        s.cogs_actual, s.cogs_py, subtotal_subject("COGS"), "prior year", notes,
     )
     s.gross_profit_var_py_abs, s.gross_profit_var_py_pct = _variance(
-        s.gross_profit_actual, s.gross_profit_py, "Gross profit", "prior year", notes,
+        s.gross_profit_actual, s.gross_profit_py, subtotal_subject("Gross profit"), "prior year", notes,
     )
     s.opex_var_py_abs, s.opex_var_py_pct = _variance(
-        s.opex_actual, s.opex_py, "Opex subtotal", "prior year", notes,
+        s.opex_actual, s.opex_py, subtotal_subject("Opex"), "prior year", notes,
     )
     s.ebit_var_py_abs, s.ebit_var_py_pct = _variance(
-        s.ebit_actual, s.ebit_py, "EBIT", "prior year", notes,
+        s.ebit_actual, s.ebit_py, subtotal_subject("EBIT"), "prior year", notes,
     )
 
     # Points from the full precision margins, never from rounded ones.
@@ -254,19 +250,13 @@ def add_gross_margin_kpi(
     kept: list[Kpi] = []
     for kpi in kpis:
         if kpi.is_metric(GROSS_MARGIN_KPI_METRIC):
-            notes.append(
-                f"kpi ({kpi.metric}): input row ignored, the gross margin "
-                f"computed from the P&L was used instead"
-            )
+            notes.append(margin_row_ignored(kpi.metric))
         else:
             kept.append(kpi)
 
     s = subtotals
     if s.gross_margin_actual is None or s.gross_margin_budget is None:
-        notes.append(
-            f"kpi ({GROSS_MARGIN_KPI_METRIC}): not shown, as the actual or "
-            f"budget gross margin could not be computed"
-        )
+        notes.append(margin_not_shown())
         return kept, notes
 
     kept.append(Kpi(

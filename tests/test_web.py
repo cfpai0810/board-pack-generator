@@ -6,8 +6,12 @@ whose text matches the CLI's. W2: the review stage edits each section with
 live flags, signs only with a name and the word SIGN (the engine decides),
 saves drafts, offers the FINAL PDF and the audit lines, never reruns the
 pipeline on a page rerun, and starts over cleanly. Throughout, the web layer
-imports only src.pipeline and hands no Decimal to a widget. No test opens a
-network connection (conftest.py blocks sockets suite-wide).
+imports only src.pipeline and hands no Decimal to a widget. W3: own files
+(uploaded through AppTest's file uploader, and staged by lib/inputs, which
+is also tested directly), the entity, period and cash unit, the thresholds,
+and the model choice with a fake client; inputs changed after a draft need
+a new one. No test opens a network connection (conftest.py blocks sockets
+suite-wide).
 """
 
 from __future__ import annotations
@@ -20,6 +24,8 @@ import re
 import sys
 from decimal import Decimal
 from pathlib import Path
+
+import types
 
 import pytest
 
@@ -117,7 +123,7 @@ class TestSampleRun:
 
     def test_the_drivers_table_has_six_rows(self, sample_run):
         rows = re.findall(
-            r'<tr><td>([^<]*)</td><td>([^<]*)</td><td class="num">([^<]*)</td></tr>',
+            r'<tr><td>([^<]*)</td><td class="label">([^<]*)</td><td class="num">([^<]*)</td></tr>',
             _markdown(sample_run))
         assert rows == [
             ("Gross profit", "Retail", "(56,180)"), ("", "Ingredients", "(37,310)"),
@@ -344,9 +350,365 @@ class TestWebLayerBoundary:
         source = (APP / "lib" / "claude_client.py").read_text(encoding="utf-8")
         assert "claude-" not in source
 
+    def test_controls_are_ink_not_the_default_red(self):
+        import tomllib
+        from streamlit_app.lib.theme import INK
+        theme = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))
+        assert theme["theme"]["primaryColor"] == INK
+
     def test_the_summary_box_is_not_status_green(self):
         from streamlit_app.lib.theme import FINAL, inject_css
         css = inject_css()
         start = css.index(".bp-narrative")
         assert FINAL not in css[start:css.index("}", start)]
         assert css.count(FINAL) == 1          # green appears only on the FINAL chip
+
+
+# ── W3: YOUR OWN DATA, THRESHOLDS AND THE MODEL ───────────────────────
+
+SAMPLE_PNL = (ROOT / "data" / "pnl.csv").read_bytes()
+SAMPLE_KPIS = (ROOT / "data" / "kpis.csv").read_bytes()
+POUNDS_KPIS = (b"metric,actual,target,prior_year\r\nHeadcount,214,205,198\r\n"
+               b"Cash balance (GBP),1176000,1350000,1288000\r\n")
+FAKE_KEY = "sk-ant-" + "0" * 40              # shaped like a key; never sent anywhere
+MODEL_SECTIONS = {
+    "exec_summary": "Revenue was £2.48m, £112k (4.3%) below budget.",
+    "pnl": "Retail was £56k (3.3%) below budget.",
+    "kpis": "Headcount was 214, 9 above target.",
+    "cash": "The cash balance was £1.18m, £174k below target.",
+}
+
+
+class FakeClient:
+    """Stands in for anthropic.Anthropic: client.messages.create(**kwargs)."""
+
+    def __init__(self, error=None):
+        self.error, self.calls = error, []
+        self.messages = types.SimpleNamespace(create=self._create)
+
+    def _create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        return types.SimpleNamespace(
+            model="claude-sonnet-4-6", stop_reason="end_turn",
+            content=[types.SimpleNamespace(type="text", text=json.dumps(MODEL_SECTIONS))],
+            usage=types.SimpleNamespace(input_tokens=1840, output_tokens=412))
+
+
+def _own(at, pnl=SAMPLE_PNL, kpis=SAMPLE_KPIS, entity="Test Co", period="September 2026",
+         cash="thousands", build=True):
+    """Choose own files on the form, fill it in, and (by default) build the draft."""
+    at.radio(key="in_source").set_value("Use my own files").run()
+    if pnl is not None:
+        at.file_uploader(key="in_pnl").set_value(("pnl.csv", pnl, "text/csv"))
+    if kpis is not None:
+        at.file_uploader(key="in_kpis").set_value(("kpis.csv", kpis, "text/csv"))
+    at.text_input(key="in_entity").input(entity)
+    at.text_input(key="in_period").input(period)
+    at.radio(key="in_cash").set_value(cash)
+    at.run()
+    if build:
+        at.button(key="bp_run").click().run()
+    assert not at.exception, at.exception
+    return at
+
+
+def _text(at) -> str:
+    """Everything the page says: markdown, captions, alerts and the edit boxes."""
+    parts = [m.value for m in at.markdown] + [c.value for c in at.caption]
+    parts += [e.value for e in at.error] + [w.value for w in at.warning]
+    parts += [t.value for t in at.text_area]
+    return " ".join(parts)
+
+
+def _final_pdf(at) -> bytes:
+    _sign(at)
+    assert at.session_state["bp_result"]["status"] == "FINAL"
+    return at.session_state["bp_result"]["pdf"]
+
+
+def _no_dates(text: str) -> str:
+    text = re.sub(r"\d{1,2} \w+ \d{4} at \d\d:\d\d UTC", "<when>", text)
+    return re.sub(r"Review run: [0-9a-f]{32}\.", "", text)
+
+
+def _with_key(at):
+    at.sidebar.text_input(key="byo_api_key").input(FAKE_KEY).run()
+    return at
+
+
+class TestOwnFiles:
+    def test_the_sample_as_own_files_gives_the_sample_pack(self):
+        sample = _app(BOARD).run()
+        sample.button(key="bp_run").click().run()
+        own = _own(_app(BOARD).run(), entity="Harmwell Foods Ltd", period="June 2026")
+        a, b = _final_pdf(sample), _final_pdf(own)
+        assert _no_dates(_pdf_text(a)) == _no_dates(_pdf_text(b))
+        assert own.session_state["bp_result"]["pdf_name"] == \
+            "harmwell_foods_2026_06_board_pack_FINAL.pdf"
+
+    def test_test_co_september(self):
+        at = _own(_app(BOARD).run())
+        pack = at.session_state["bp_pack"]
+        assert (pack.entity, pack.period) == ("Test Co", "September 2026")
+        _edit(at, "exec_summary", lambda t: t + " The September 2026 close ran to plan.")
+        assert "matches no figure" not in _markdown(at)       # the period is not a figure
+        pdf = _final_pdf(at)
+        assert at.session_state["bp_result"]["pdf_name"] == "test_co_2026_09_board_pack_FINAL.pdf"
+        text = _pdf_text(pdf)
+        assert "Test Co Monthly management pack, September 2026" in text
+        assert "Entity and period: Test Co, September 2026." in text
+        page = _text(at)
+        for stale in ("Harmwell", "June"):
+            assert stale not in text and stale not in page, stale
+
+    def test_cash_stated_in_pounds(self):
+        at = _own(_app(BOARD).run(), kpis=POUNDS_KPIS, cash="pounds")
+        cash = at.text_area(key="bp_edit_cash").value
+        assert "£1.18m" in cash and "bn" not in cash
+
+    def test_no_kpi_file(self):
+        at = _own(_app(BOARD).run(), kpis=None)
+        pack = at.session_state["bp_pack"]
+        assert [k["metric"] for k in pack.section(pack.sections[2].section_type).figures["kpis"]] \
+            == ["Gross margin (%)"]
+        assert at.text_area(key="bp_edit_cash").value == "No cash balance was supplied."
+        assert "No KPI file was supplied, so the KPIs show only the gross margin" in _markdown(at)
+
+    def test_45k_puts_opex_in_the_executive_summary(self):
+        at = _app(BOARD).run()
+        at.text_input(key="in_abs").input("45,000").run()
+        at.button(key="bp_run").click().run()
+        pack = at.session_state["bp_pack"]
+        assert "Opex" in [pack.item(k)["name"] for k in pack.material_flags.exec_summary_items]
+        assert "£45,000" in _markdown(at)                    # the material key under the P&L
+
+    @pytest.mark.parametrize("abs_text, pct_text, says", [
+        ("0", "10", "The absolute threshold must be a positive amount"),
+        ("50,000", "150", "The percentage threshold must be above 0 and at most 100")])
+    def test_a_bad_threshold_is_refused_plainly(self, abs_text, pct_text, says):
+        at = _app(BOARD).run()
+        at.text_input(key="in_abs").input(abs_text)
+        at.text_input(key="in_pct").input(pct_text).run()
+        assert says in " ".join(e.value for e in at.error)
+        at.button(key="bp_run").click().run()
+        assert not at.exception and "bp_pack" not in at.session_state
+
+    @pytest.mark.parametrize("pnl, says", [
+        (SAMPLE_PNL + b"x" * (1024 * 1024), "the limit is 1 MB"),
+        (b"line_item,category,actuals,budget,prior_year\n"
+         + b"Rent,opex,1,1,1\n" * 501, "has 501 lines; the limit is 500"),
+        (b"line_item,category,actuals,prior_year\nRetail,revenue,1,1\n",
+         "The P&L file is missing the column budget"),
+        (b"line_item,category,actuals,budget,prior_year\nRetail,revenue,lots,1,1\n",
+         "no lines that could be loaded"),
+    ], ids=["over-1MB", "over-500-lines", "missing-column", "no-loadable-lines"])
+    def test_a_file_that_cannot_be_used_gives_a_plain_message_and_no_pack(self, pnl, says):
+        at = _own(_app(BOARD).run(), pnl=pnl)
+        assert says in " ".join(e.value for e in at.error)
+        assert "Traceback" not in _text(at)
+        assert "bp_pack" not in at.session_state and len(at.text_area) == 0
+        assert list(_folder(at).iterdir()) == []                # nothing written, nothing kept
+
+    def test_the_form_must_be_complete(self):
+        at = _own(_app(BOARD).run(), pnl=None, entity="", period="")
+        assert ("To build from your own files, upload a P&L CSV file (the KPI file is "
+                "optional); type the entity name; type the period, such as September 2026."
+                in " ".join(e.value for e in at.error))
+        assert "bp_pack" not in at.session_state
+
+    def test_the_data_notes_panel(self):
+        long_name = b"Ingredients, packaging and inbound freight for the Leeds and York sites"
+        rows = SAMPLE_PNL.splitlines()
+        rows[4] = b'"' + long_name + b'"' + rows[4][rows[4].index(b","):]
+        rows[5] = rows[5][rows[5].index(b","):]
+        pnl = b"\r\n".join(rows + [b"Rent,opex,n/a,1,1"]) + b"\r\n"
+        at = _own(_app(BOARD).run(), pnl=pnl)
+        html = _markdown(at)
+        notes = at.session_state["bp_run_notes"]["data"]
+        assert len(notes) >= 4
+        for note in notes:
+            assert html_escape(note) in html, note
+        assert html.index("Data notes") < html.index("Profit and loss")
+        joined = " ".join(notes)
+        for expected in ("P&L row 13 (Rent): the actual 'n/a' could not be read",
+                         "it is kept as 'Unnamed COGS line'", "is longer than 60 characters",
+                         "These totals exclude 1 row of the source file that could not be "
+                         "read: Rent (row 13)."):
+            assert expected in joined, expected
+
+    def test_a_clean_sample_has_no_data_notes(self, sample_run):
+        assert "None: every row loaded and passed the checks." in _markdown(sample_run)
+        assert "Commentary drafted by: Template" in _text(sample_run)
+
+    def test_uploads_are_deleted_after_the_run(self):
+        at = _own(_app(BOARD).run())
+        assert not (_folder(at) / "inputs").exists()
+        assert sorted(p.suffix for p in _folder(at).iterdir()) == [".jsonl", ".pdf"]
+
+    def test_the_page_says_what_happens_to_the_files(self):
+        at = _own(_app(BOARD).run(), build=False)
+        text = _text(at)
+        assert "Amounts are treated as pounds sterling." in text
+        assert ("Your files are written only to this session's own temporary folder on "
+                "the server, read once to build the pack, then deleted." in text)
+        assert [d.proto.label for d in at.get("download_button")] == [
+            "Sample P&L CSV", "Sample KPI CSV"]
+
+    def test_the_header_names_no_sample_entity(self):
+        at = _own(_app(BOARD).run(), build=False)
+        assert "Harmwell" not in _markdown(at)
+
+
+class TestChangedInputs:
+    def test_changed_inputs_need_a_new_draft(self):
+        at = _drafted()
+        assert not at.button(key="bp_signoff").disabled
+        at.text_input(key="in_abs").input("45,000").run()
+        assert "The inputs have changed since this draft was built." in _text(at)
+        assert at.button(key="bp_signoff").disabled
+        at.text_input(key="in_abs").input("50,000").run()        # put back: the same inputs
+        assert not at.button(key="bp_signoff").disabled
+        at.text_input(key="in_abs").input("45,000").run()
+        first = at.session_state["bp_pack"].run_id
+        at.button(key="bp_run").click().run()
+        assert at.session_state["bp_pack"].run_id != first
+        assert not at.button(key="bp_signoff").disabled
+        assert "The inputs have changed" not in _text(at)
+
+    def test_unsaved_edits_are_confirmed_before_a_new_build(self):
+        at = _drafted()
+        _edit(at, "exec_summary", lambda t: t + REASON)
+        at.text_input(key="in_abs").input("45,000").run()
+        at.button(key="bp_run").click().run()
+        assert "Building a new draft discards them." in _text(at)
+        at.button(key="bp_keep_build").click().run()
+        assert REASON in at.text_area(key="bp_edit_exec_summary").value
+        at.button(key="bp_run").click().run()
+        at.button(key="bp_discard_build").click().run()
+        assert REASON not in at.text_area(key="bp_edit_exec_summary").value
+        assert at.session_state["bp_built_from"].materiality_abs == "45,000"
+
+    def test_saved_edits_need_no_confirmation(self):
+        at = _drafted()
+        _edit(at, "cash", lambda t: t + " A customer paid late.")
+        at.button(key="bp_save").click().run()
+        at.text_input(key="in_pct").input("5").run()
+        at.button(key="bp_run").click().run()
+        assert "Building a new draft discards them." not in _text(at)
+        assert at.session_state["bp_built_from"].materiality_pct == "5"
+
+
+class TestModelChoice:
+    def test_no_key_disables_the_model(self):
+        at = _app(BOARD).run()
+        radio = at.radio(key="in_commentary")
+        assert radio.disabled and radio.value == "Template"
+        assert "Add your Anthropic API key in the sidebar to draft with the model." in _text(at)
+
+    def test_the_model_drafts_every_section_with_the_token_line(self, monkeypatch):
+        from streamlit_app.lib import claude_client
+        fake, built = FakeClient(), []
+        monkeypatch.setattr(claude_client, "build_client",
+                            lambda key: built.append(key == FAKE_KEY) or fake)
+        at = _with_key(_app(BOARD).run())
+        radio = at.radio(key="in_commentary")
+        assert not radio.disabled
+        radio.set_value("Model").run()
+        assert "only the formatted figures and names in the pack facts are sent to" in _text(at)
+        at.button(key="bp_run").click().run()
+        assert not at.exception, at.exception
+        pack = at.session_state["bp_pack"]
+        assert {s.drafted_by for s in pack.sections} == {"model"}
+        assert built == [True] and len(fake.calls) == 1        # one client, one call
+        assert ("Commentary drafted by: claude-sonnet-4-6, 1,840 input and 412 output tokens"
+                in _text(at))
+        assert at.text_area(key="bp_edit_exec_summary").value == MODEL_SECTIONS["exec_summary"]
+
+    def test_the_model_sees_no_file_bytes(self, monkeypatch):
+        from streamlit_app.lib import claude_client
+        fake = FakeClient()
+        monkeypatch.setattr(claude_client, "build_client", lambda key: fake)
+        at = _with_key(_app(BOARD).run())
+        at.radio(key="in_commentary").set_value("Model").run()
+        _own(at)
+        sent = json.dumps(fake.calls[0])
+        assert "line_item,category" not in sent and "1643820" not in sent
+        assert "Test Co" in sent and "September 2026" in sent
+
+    def test_a_failed_call_shows_the_template_and_the_notice(self, monkeypatch):
+        from streamlit_app.lib import claude_client
+        monkeypatch.setattr(claude_client, "build_client",
+                            lambda key: FakeClient(error=RuntimeError("down")))
+        at = _with_key(_app(BOARD).run())
+        at.radio(key="in_commentary").set_value("Model").run()
+        at.button(key="bp_run").click().run()
+        pack = at.session_state["bp_pack"]
+        assert {s.drafted_by for s in pack.sections} == {"template"}
+        assert ("Commentary: the model call failed (RuntimeError), so the template drafted "
+                "every section." in " ".join(w.value for w in at.warning))
+        assert "Commentary drafted by: Template" in _text(at)
+
+    def test_removing_the_key_falls_back_to_the_template(self, monkeypatch):
+        at = _with_key(_app(BOARD).run())
+        at.radio(key="in_commentary").set_value("Model").run()
+        at.sidebar.text_input(key="byo_api_key").input("").run()
+        radio = at.radio(key="in_commentary")
+        assert radio.disabled and radio.value == "Template"
+
+
+class TestUploadHandling:
+    """lib/inputs directly: the limits, the staging folder, the clean-up."""
+
+    def test_size_and_line_limits(self):
+        from streamlit_app.lib.inputs import MAX_BYTES, Upload, UploadError, check_upload
+        check_upload("P&L", Upload("p.csv", b"h\n" + b"x\n" * 500), 500)
+        with pytest.raises(UploadError, match="has 501 lines; the limit is 500"):
+            check_upload("P&L", Upload("p.csv", b"h\n" + b"x\n" * 501), 500)
+        check_upload("KPI", Upload("k.csv", b"x" * MAX_BYTES))
+        with pytest.raises(UploadError, match="is 1,025 KB; the limit is 1 MB"):
+            check_upload("KPI", Upload("k.csv", b"x" * (MAX_BYTES + 1)))
+
+    def test_blank_lines_do_not_count(self):
+        from streamlit_app.lib.inputs import Upload, check_upload
+        check_upload("P&L", Upload("p.csv", b"h\n" + b"x\n\n\n" * 500), 500)
+
+    def test_staged_under_fixed_names_in_the_session_folder(self, tmp_path):
+        from streamlit_app.lib.inputs import OWN, RunInputs, Upload, stage
+        inputs = RunInputs(source=OWN, pnl=Upload("../../evil.csv", SAMPLE_PNL),
+                           kpis=Upload("C:/Windows/kpis.csv", SAMPLE_KPIS),
+                           entity="Test Co", period="September 2026")
+        pnl, kpis = stage(inputs, tmp_path)
+        assert (pnl, kpis) == (tmp_path / "inputs" / "pnl.csv", tmp_path / "inputs" / "kpis.csv")
+        assert pnl.read_bytes() == SAMPLE_PNL and kpis.read_bytes() == SAMPLE_KPIS
+        assert [p for p in tmp_path.rglob("*") if p.is_file()] == sorted([kpis, pnl])
+
+    def test_the_sample_is_never_copied(self, tmp_path):
+        from config import KPIS_PATH, PNL_PATH
+        from streamlit_app.lib.inputs import RunInputs, stage
+        assert stage(RunInputs(), tmp_path) == (PNL_PATH, KPIS_PATH)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_build_draft_deletes_the_uploads_whatever_happens(self, tmp_path):
+        from src.pipeline import PipelineError
+        from streamlit_app.lib.inputs import OWN, RunInputs, Upload, build_draft
+        good = RunInputs(source=OWN, pnl=Upload("p.csv", SAMPLE_PNL), entity="Test Co",
+                         period="September 2026")
+        result = build_draft(good, tmp_path / "a")
+        assert result.pack.entity == "Test Co" and not (tmp_path / "a" / "inputs").exists()
+        bad = RunInputs(source=OWN, pnl=Upload("p.csv", b"line_item,category\nRetail,revenue\n"),
+                        entity="Test Co", period="September 2026")
+        with pytest.raises(PipelineError, match="missing the columns actuals, budget, prior_year"):
+            build_draft(bad, tmp_path / "b")
+        assert list((tmp_path / "b").iterdir()) == []
+
+    def test_a_refused_form_writes_nothing(self, tmp_path):
+        from streamlit_app.lib.inputs import OWN, RunInputs, UploadError, build_draft
+        with pytest.raises(UploadError, match="upload a P&L CSV file"):
+            build_draft(RunInputs(source=OWN, entity="Test Co", period="May 2026"), tmp_path)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_with_the_sample_the_own_file_fields_do_not_count(self):
+        from streamlit_app.lib.inputs import RunInputs, Upload
+        assert RunInputs(entity="Test Co", pnl=Upload("p.csv", b"x")).effective() == RunInputs()

@@ -1,0 +1,5 @@
+# Streamlit theme: controls in ink, never the default red. Colour is kept for
+# status (the DRAFT and FINAL chips) and materiality only; lib/theme.py holds
+# the palette, and test_web checks this value matches its INK.
+[theme]
+primaryColor = "#1E2A2E"

@@ -12,6 +12,7 @@ not one of the three is rejected at load time.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
@@ -187,8 +188,14 @@ class Subtotals:
 
 # -- KPI ----------------------------------------------------------------------
 
-def _metric_key(name: str) -> str:
-    """A metric name reduced to lower-case letters and digits, for matching."""
+def _metric_key(name: str, *, ignore_unit: bool = False) -> str:
+    """
+    A metric name reduced to lower-case letters and digits, for matching.
+    ignore_unit drops a trailing "(unit)" first, so "Cash balance (GBP 000s)",
+    "Cash balance (GBP)" and "Cash balance" are the same metric.
+    """
+    if ignore_unit:
+        name = re.sub(r"\s*\([^)]*\)\s*$", "", name)
     return "".join(ch for ch in name.casefold() if ch.isalnum())
 
 
@@ -213,12 +220,14 @@ class Kpi:
 
     derived: bool = False
 
-    def is_metric(self, name: str) -> bool:
+    def is_metric(self, name: str, *, ignore_unit: bool = False) -> bool:
         """
         True when this KPI is the metric called name, ignoring case, spaces
-        and punctuation ("Gross margin %" matches "Gross margin (%)").
+        and punctuation ("Gross margin %" matches "Gross margin (%)"), and
+        with ignore_unit any trailing "(unit)" too.
         """
-        return _metric_key(self.metric) == _metric_key(name)
+        return (_metric_key(self.metric, ignore_unit=ignore_unit)
+                == _metric_key(name, ignore_unit=ignore_unit))
 
 
 # -- Section ------------------------------------------------------------------
@@ -357,6 +366,10 @@ class Pack:
     summary the reviewer confirmed: every warning outstanding when they
     signed. run_id is the latest review run, so a render can link its
     audit event to it; code_version is the code that computed the figures.
+    cash_scale is what one unit of the cash KPI is worth in pounds (1000 when
+    the file states cash in thousands, 1 when in pounds): an input of the
+    run, never assumed. kpis_supplied is False when the run had no KPI file,
+    so the governance block can say so rather than show an empty hash.
     """
     entity: str = ""
     period: str = ""
@@ -368,6 +381,7 @@ class Pack:
     material_flags: Optional[MaterialFlags] = None
     warnings: list[str] = field(default_factory=list)
     excluded_pnl_rows: int = 0
+    excluded_rows: list = field(default_factory=list)      # SkippedRow(row, name) each
     numeric_warnings: list[Flag] = field(default_factory=list)
     cause_warnings: list[Flag] = field(default_factory=list)
     direction_warnings: list[Flag] = field(default_factory=list)
@@ -383,6 +397,8 @@ class Pack:
     kpis_sha256: str = ""
     run_id: str = ""
     code_version: str = ""
+    cash_scale: int = 1000
+    kpis_supplied: bool = True
 
     def section(self, section_type: SectionType) -> Section:
         """The section of the given type."""

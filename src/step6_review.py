@@ -59,7 +59,9 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from config import ROOT, VERSION
+from src import notes
 from src.formatting import unprintable
+from src.notes import Note
 from src.state import (
     DRAFT_TEXT, GLYPH, NUMERIC, REVIEWER_TEXT, SUBTOTALS, Flag, Pack, PackStatus,
     Section, SectionType,
@@ -248,14 +250,14 @@ def signoff_summary(pack: Pack) -> list[str]:
     """
     summary = [f.message for f in outstanding_flags(pack)]
     summary += list(pack.warnings)
-    n = pack.excluded_pnl_rows
-    if n:
-        rows = "row" if n == 1 else "rows"
-        summary.append(
-            f"The totals exclude {n} P&L {rows} that could not be loaded, "
-            f"so they do not tie to the source file."
-        )
+    if pack.excluded_pnl_rows:
+        summary.append(excluded_rows_note(pack))
     return summary
+
+
+def excluded_rows_note(pack: Pack) -> str:
+    """The rows the totals leave out, named: the same sentence as the box above the PDF's P&L."""
+    return notes.excluded_rows(pack.excluded_rows, pack.excluded_pnl_rows)
 
 
 # -- The audit record ---------------------------------------------------------
@@ -324,7 +326,10 @@ def audit_record(pack: Pack, *, run_id: str, timestamp: str, reviewer: str,
         "inputs": {
             "pnl_sha256": pack.pnl_sha256,
             "kpis_sha256": pack.kpis_sha256,
+            "kpis_supplied": pack.kpis_supplied,
+            "cash_scale": pack.cash_scale,
             "excluded_pnl_rows": pack.excluded_pnl_rows,
+            "excluded_rows": [{"row": r.row, "name": r.name} for r in pack.excluded_rows],
         },
         "headline": headline_figures(pack),
         "materiality": {
@@ -356,6 +361,7 @@ def audit_record(pack: Pack, *, run_id: str, timestamp: str, reviewer: str,
         "direction_warnings": [_flag_record(f) for f in pack.direction_warnings],
         "glyph_warnings": [_flag_record(f) for f in pack.glyph_warnings],
         "warnings": list(pack.warnings),
+        "notes": [w.record() for w in pack.warnings if isinstance(w, Note)],
         "acknowledged": list(pack.acknowledged),
         "reviewer": reviewer or None,
         "sign_off_by": pack.sign_off_by if signed else None,

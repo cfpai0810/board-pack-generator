@@ -40,7 +40,7 @@ def pnl_table_html(rows: list[PnlRow]) -> str:
     for row in rows:
         classes = row.kind + (" material" if row.material else "")
         cells = "".join(f'<td class="num">{_E(c)}</td>' for c in row.cells)
-        body.append(f'<tr class="{classes}"><td>{_E(row.label)}</td>{cells}</tr>')
+        body.append(f'<tr class="{classes}"><td class="label">{_E(row.label)}</td>{cells}</tr>')
     return (f'<div class="bp-table-wrap"><table class="bp-table"><thead>{head}</thead>'
             f'<tbody>{"".join(body)}</tbody></table></div>')
 
@@ -50,7 +50,8 @@ def drivers_table_html(rows: list[DriverRow]) -> str:
     head = (f'<tr><th>{_E(top[0])}</th><th>{_E(top[1])}</th><th class="num">{_E(top[2])}</th></tr>'
             f'<tr><th></th><th></th><th class="num">{_E(units[2])}</th></tr>')
     body = "".join(
-        f'<tr><td>{_E(r.subtotal)}</td><td>{_E(r.line)}</td><td class="num">{_E(r.impact)}</td></tr>'
+        f'<tr><td>{_E(r.subtotal)}</td><td class="label">{_E(r.line)}</td>'
+        f'<td class="num">{_E(r.impact)}</td></tr>'
         for r in rows
     )
     return (f'<div class="bp-table-wrap"><table class="bp-table" style="width:auto">'

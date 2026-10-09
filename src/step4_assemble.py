@@ -39,13 +39,16 @@ context, so the comparison really is at full precision.
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from typing import Optional
 
 from config import (
-    CASH_KPI_METRIC, ENTITY_NAME, MATERIALITY_ABS, MATERIALITY_PCT, PERIOD,
+    CASH_KPI_METRIC, CASH_KPI_SCALE, ENTITY_NAME, MATERIALITY_ABS, MATERIALITY_PCT,
+    PERIOD,
 )
-from src.formatting import sign_change
+from src import notes
+from src.formatting import cash_pounds, prose_money, sign_change
 from src.state import (
     SECTION_TITLES, SUBTOTALS, Category, Kpi, MaterialFlags, Pack, PackStatus, PnlLine,
     Section, SectionType, Subtotals, line_key, subtotal_key,
@@ -299,23 +302,21 @@ def _kpis_section(kpis: list[Kpi]) -> Section:
         section_type=SectionType.KPIS,
         title=SECTION_TITLES[SectionType.KPIS.value],
         figures={"kpis": [_kpi_figures(k) for k in kpis
-                          if not k.is_metric(CASH_KPI_METRIC)]},
+                          if not k.is_metric(CASH_KPI_METRIC, ignore_unit=True)]},
     )
 
 
-def _cash_section(kpis: list[Kpi], problems: list[str]) -> Section:
+def _cash_section(kpis: list[Kpi], problems: list[str], kpis_supplied: bool = True) -> Section:
     """
-    The cash BALANCE from the cash KPI, in the unit its name states. Not a
-    cash flow statement: the inputs hold no opening, closing or movement,
-    so none is shown. If no cash KPI was supplied, the section says so and
-    a warning joins the problems list.
+    The cash BALANCE from the cash KPI. Not a cash flow statement: the
+    inputs hold no opening, closing or movement, so none is shown. If the
+    KPI file has no cash KPI, the section says so and a note joins the
+    problems list; with no KPI file at all, that file's own note covers it.
     """
-    cash = next((k for k in kpis if k.is_metric(CASH_KPI_METRIC)), None)
+    cash = next((k for k in kpis if k.is_metric(CASH_KPI_METRIC, ignore_unit=True)), None)
     if cash is None:
-        problems.append(
-            f"kpi ({CASH_KPI_METRIC}): not supplied, so the cash section "
-            f"shows no balance"
-        )
+        if kpis_supplied:
+            problems.append(notes.no_cash_kpi())
         figures = {"supplied": False, "metric": CASH_KPI_METRIC, "note": NO_CASH_NOTE}
     else:
         figures = {"supplied": True, **_kpi_figures(cash)}
@@ -324,6 +325,52 @@ def _cash_section(kpis: list[Kpi], problems: list[str]) -> Section:
         title=SECTION_TITLES[SectionType.CASH.value],
         figures=figures,
     )
+
+
+# -- Guards against the wrong cash unit ----------------------------------------------
+
+_THOUSANDS_HINT = re.compile(r"000|thousand|£\s*k\b|gbp\s*k\b|^k$", re.IGNORECASE)
+_POUNDS_HINT = re.compile(r"^(gbp|£|pounds?|sterling|gbp\s*£|£\s*gbp)$", re.IGNORECASE)
+CASH_REVENUE_MULTIPLE = Decimal("100")
+
+
+def unit_hint(metric: str) -> Optional[int]:
+    """
+    What the cash KPI's own name says its unit is: 1000 for "(GBP 000s)",
+    "(£000)", "(£k)" or "(thousands)", 1 for "(GBP)", "(£)" or "(pounds)",
+    None when the name carries no unit or one this does not recognise.
+    """
+    found = re.search(r"\(([^)]*)\)\s*$", metric)
+    if not found:
+        return None
+    unit = found.group(1).strip()
+    if _THOUSANDS_HINT.search(unit):
+        return 1000
+    if _POUNDS_HINT.match(unit):
+        return 1
+    return None
+
+
+def cash_unit_notes(kpis: list[Kpi], subtotals: Subtotals, cash_scale: int) -> list[str]:
+    """
+    Two soft checks on the unit chosen for cash, the input most likely to be
+    wrong and wrong by a factor of a thousand. Each is a note for the data
+    notes and the sign-off summary, never a block:
+      - the cash KPI's name states a unit that disagrees with the one chosen;
+      - the cash balance in pounds is more than 100 times the month's revenue.
+    """
+    cash = next((k for k in kpis if k.is_metric(CASH_KPI_METRIC, ignore_unit=True)), None)
+    if cash is None or cash.actual is None:
+        return []
+    found = []
+    hinted = unit_hint(cash.metric)
+    if hinted is not None and hinted != cash_scale:
+        found.append(notes.cash_unit_hint(cash.metric, hinted, cash_scale))
+    revenue = subtotals.revenue_actual
+    balance = cash_pounds(cash.actual, cash_scale)
+    if revenue > 0 and balance.copy_abs() > CASH_REVENUE_MULTIPLE * revenue:
+        found.append(notes.cash_vs_revenue(prose_money(balance), prose_money(revenue)))
+    return found
 
 
 # -- Orchestrator -------------------------------------------------------------
@@ -339,6 +386,11 @@ def assemble(
     materiality_pct: Decimal = MATERIALITY_PCT,
     pnl_sha256: str = "",
     kpis_sha256: str = "",
+    entity: Optional[str] = None,
+    period: Optional[str] = None,
+    cash_scale: Optional[int] = None,
+    kpis_supplied: bool = True,
+    excluded_rows: tuple = (),
 ) -> Pack:
     """
     Flag materiality, de-dup, find drivers, and build the DRAFT Pack.
@@ -348,7 +400,12 @@ def assemble(
     the Decimal boundary here via Decimal(str(x)), so an int from a UI
     control is safe. The problems list becomes Pack.warnings (the same
     list, with any cash warning appended). The input file hashes from
-    step1 are carried onto the Pack for the audit.
+    step1 are carried onto the Pack for the audit. entity, period and
+    cash_scale are inputs of the run; left as None they come from config
+    (the sample), and everything downstream reads them from the Pack.
+    excluded_rows names the rows behind excluded_pnl_rows, for the notice
+    above the P&L table. The cash unit guards add their notes here, where
+    the unit, the cash balance and the revenue are all known.
     """
     materiality_abs = Decimal(str(materiality_abs))
     materiality_pct = Decimal(str(materiality_pct))
@@ -376,12 +433,17 @@ def assemble(
         _exec_summary_section(subtotals, material_subtotals, exec_lines, drivers),
         _pnl_section(pnl_lines, subtotals, material_subtotals, commentary_lines),
         _kpis_section(kpis),
-        _cash_section(kpis, problems),
+        _cash_section(kpis, problems, kpis_supplied),
     ]
+    scale = CASH_KPI_SCALE if cash_scale is None else cash_scale
+    problems.extend(cash_unit_notes(kpis, subtotals, scale))
 
     return Pack(
-        entity=ENTITY_NAME,
-        period=PERIOD,
+        entity=ENTITY_NAME if entity is None else entity,
+        period=PERIOD if period is None else period,
+        cash_scale=scale,
+        kpis_supplied=kpis_supplied,
+        excluded_rows=list(excluded_rows),
         sections=sections,
         status=PackStatus.DRAFT,
         pnl_lines=pnl_lines,

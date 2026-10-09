@@ -41,6 +41,7 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
     KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table,
@@ -52,9 +53,9 @@ from src.formatting import (
 )
 from src.state import Pack, PackStatus, SectionType
 from src.step5_narrate import TEMPLATE, clean_dashes
-from src.step6_review import _utc_now, signoff_summary, write_audit
+from src.step6_review import _utc_now, excluded_rows_note, signoff_summary, write_audit
 from src.tables import (
-    CASH_NOTE, DRAFT_HEX, DRIVERS_HEADER, DRIVERS_NOTE, FINAL_HEX, KPI_NOTE, LINE,
+    DRAFT_HEX, DRIVERS_HEADER, DRIVERS_NOTE, FINAL_HEX, KPI_NOTE, LINE, cash_note,
     MATERIAL_HEX, PNL_HEADER, RULE_HEX, SUBTOTAL, drivers_rows, pnl_notes, pnl_rows,
 )
 
@@ -102,15 +103,33 @@ def _short(sha: str) -> str:
     return sha[:12] if sha else "not recorded"
 
 
+_CELL = ParagraphStyle("cell", parent=_BASE, fontSize=8, leading=9.5)
+_CELL_BOLD = ParagraphStyle("cell_bold", parent=_CELL, fontName="Helvetica-Bold")
+
+
+def _label(text: str, width: float, bold: bool = False):
+    """
+    A name cell. Plain text when it fits its column; when it would not, a
+    Paragraph that wraps inside the column, so a long line or KPI name makes
+    the row taller rather than the table wider.
+    """
+    text = _safe(text)
+    if stringWidth(text, "Helvetica-Bold" if bold else "Helvetica", 8) <= width:
+        return text
+    return Paragraph(escape(text), _CELL_BOLD if bold else _CELL)
+
+
 # -- The P&L table ------------------------------------------------------------
 
 def _pnl_table(pack: Pack) -> Table:
     """The P&L table, drawn from src.tables.pnl_rows: the same cells the web layer shows."""
     rows = pnl_rows(pack)
-    data = [list(PNL_HEADER[0]), list(PNL_HEADER[1])]
-    data += [[_safe(row.label), *row.cells] for row in rows]
-
     label_w = 4.3 * cm
+    data = [list(PNL_HEADER[0]), list(PNL_HEADER[1])]
+    # 18 points of padding at most: 12 to indent a line, 6 on the right
+    data += [[_label(row.label, label_w - 18, bold=row.kind == SUBTOTAL), *row.cells]
+             for row in rows]
+
     num_w = (BODY_W - label_w) / 7
     style = [
         ("FONT", (0, 0), (-1, -1), "Helvetica", 8),
@@ -154,7 +173,7 @@ def _drivers_block(pack: Pack) -> list:
     if not driver_rows:
         return []
     rows = [list(DRIVERS_HEADER[0]), list(DRIVERS_HEADER[1])]
-    rows += [[r.subtotal, _safe(r.line), r.impact] for r in driver_rows]
+    rows += [[r.subtotal, _label(r.line, 4.6 * cm - 12), r.impact] for r in driver_rows]
     table = Table(rows, colWidths=[3.6 * cm, 4.6 * cm, 3.4 * cm], hAlign="LEFT")
     table.setStyle(TableStyle([
         ("FONT", (0, 0), (-1, -1), "Helvetica", 8),
@@ -162,6 +181,7 @@ def _drivers_block(pack: Pack) -> list:
         ("ALIGN", (2, 0), (2, -1), "RIGHT"),
         ("LINEBELOW", (0, 1), (-1, 1), 0.6, RULE),
         ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
     return [KeepTogether([
         _para("Main drivers of the variance against budget", _H3),
@@ -183,12 +203,12 @@ def _kpi_table(pack: Pack) -> Table:
             label = k["metric"]
             cells = [table_number(k[f]) for f in
                      ("actual", "target", "prior_year", "delta_target", "delta_py")]
-        rows.append([_safe(label)] + cells)
+        rows.append([_label(label, _LABEL_W - 12)] + cells)
     return _simple_table(rows)
 
 
-def _cash_table(figures: dict) -> Table:
-    pounds = lambda v: "n/a" if v is None else table_value(cash_pounds(v))
+def _cash_table(figures: dict, scale) -> Table:
+    pounds = lambda v: "n/a" if v is None else table_value(cash_pounds(v, scale))
     rows = [
         ["", "Actual", "Target", "Prior year", "vs target", "vs prior year"],
         ["", "£", "£", "£", "£", "£"],
@@ -198,16 +218,19 @@ def _cash_table(figures: dict) -> Table:
     return _simple_table(rows, header_rows=2)
 
 
+_LABEL_W = 5.0 * cm
+
+
 def _simple_table(rows, header_rows: int = 1) -> Table:
-    label_w = 5.0 * cm
-    num_w = (BODY_W - label_w) / (len(rows[0]) - 1)
-    table = Table(rows, colWidths=[label_w] + [num_w] * (len(rows[0]) - 1))
+    num_w = (BODY_W - _LABEL_W) / (len(rows[0]) - 1)
+    table = Table(rows, colWidths=[_LABEL_W] + [num_w] * (len(rows[0]) - 1))
     table.setStyle(TableStyle([
         ("FONT", (0, 0), (-1, -1), "Helvetica", 8),
         ("FONT", (0, 0), (-1, header_rows - 1), "Helvetica-Bold", 8),
         ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
         ("LINEBELOW", (0, header_rows - 1), (-1, header_rows - 1), 0.6, RULE),
         ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
     return table
 
@@ -256,9 +279,11 @@ def _governance(pack: Pack) -> list:
     else:
         signed = "Not signed off."
     lines = [
+        f"Entity and period: {pack.entity}, {pack.period}.",
         "Figures computed in tested Python from the source files.",
         f"Input files (SHA-256, first 12 characters): P&L {_short(pack.pnl_sha256)}, "
-        f"KPIs {_short(pack.kpis_sha256)}.",
+        + (f"KPIs {_short(pack.kpis_sha256)}." if pack.kpis_supplied
+           else "KPIs not supplied (no KPI file)."),
         f"Code version: {pack.code_version or 'not recorded'}.",
         f"Materiality: a variance against budget of £{table_value(flags.materiality_abs)} "
         f"or {pct(flags.materiality_pct)} or more, set by rule, not by the model.",
@@ -289,9 +314,7 @@ def _story(pack: Pack) -> list:
         _para("Profit and loss", _H2),
     ]
     if pack.excluded_pnl_rows:
-        n = pack.excluded_pnl_rows
-        story += [_boxed(f"These totals exclude {n} {'row' if n == 1 else 'rows'} of "
-                         f"the source file that could not be read."), Spacer(1, 6)]
+        story += [_boxed(excluded_rows_note(pack)), Spacer(1, 6)]
     story += [
         _pnl_table(pack),
         _para("Commentary on material lines", _H3),
@@ -313,9 +336,9 @@ def _story(pack: Pack) -> list:
         story += [
             KeepTogether([
                 _para("Cash", _H2),
-                _cash_table(cash.figures),
+                _cash_table(cash.figures, pack.cash_scale),
                 Spacer(1, 4),
-                _para(CASH_NOTE, _SMALL),
+                _para(cash_note(pack), _SMALL),
             ]),
             Spacer(1, 6),
             _para(cash.narrative),
@@ -429,7 +452,7 @@ def pack_file_name(pack: Pack, format: str = "pdf") -> str:
     except ValueError:
         period = "_".join(re.findall(r"[a-z0-9]+", pack.period.lower()))
     status = pack.status.value.upper()
-    return f"{'_'.join(words)}_{period}_board_pack_{status}.{format}"
+    return f"{'_'.join(words) or 'entity'}_{period}_board_pack_{status}.{format}"
 
 
 def save_pack(pack: Pack, output_dir: Path, format: str = "pdf") -> Path:

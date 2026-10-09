@@ -26,8 +26,10 @@ import hashlib
 import re
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
+from src import notes
+from src.notes import SkippedRow
 from src.state import Category, Kpi, PnlLine
 
 
@@ -73,6 +75,34 @@ def _parse_amount(raw: str | None) -> Decimal:
 
 # -- Load results -------------------------------------------------------------
 
+class MissingColumns(ValueError):
+    """An input file lacks a column the pack needs; the message names it plainly."""
+
+
+PNL_COLUMNS = ("line_item", "category", "actuals", "budget", "prior_year")
+KPI_COLUMNS = ("metric", "actual", "target")          # prior_year is optional
+NO_KPI_FILE = notes.no_kpi_file()
+
+
+def _reader(f, required: tuple[str, ...], label: str) -> csv.DictReader:
+    """
+    A DictReader whose header names are trimmed and lower-cased, so "Line_Item "
+    reads as line_item. Raises MissingColumns naming any required column that
+    is absent, rather than skipping every row as unreadable.
+    """
+    reader = csv.DictReader(f)
+    if reader.fieldnames is None:
+        raise MissingColumns(f"The {label} file is empty: it has no header row. "
+                             f"Expected the columns {', '.join(required)}.")
+    reader.fieldnames = [(name or "").strip().lower() for name in reader.fieldnames]
+    missing = [c for c in required if c not in reader.fieldnames]
+    if missing:
+        plural = "s" if len(missing) > 1 else ""
+        raise MissingColumns(f"The {label} file is missing the column{plural} "
+                             f"{', '.join(missing)}. Expected: {', '.join(required)}.")
+    return reader
+
+
 class LoadResult(NamedTuple):
     pnl_lines: list[PnlLine]
     kpis: list[Kpi]
@@ -80,6 +110,7 @@ class LoadResult(NamedTuple):
     excluded_pnl_rows: int
     pnl_sha256: str
     kpis_sha256: str
+    excluded_rows: tuple = ()          # SkippedRow for each row counted in excluded_pnl_rows
 
 
 # -- P&L loader ---------------------------------------------------------------
@@ -88,29 +119,30 @@ _CATEGORY_LOOKUP = {c.value: c for c in Category}
 _AMOUNT_COLUMNS = ("actuals", "budget", "prior_year")
 
 
-def load_pnl(path: Path) -> tuple[list[PnlLine], list[str], int]:
+def load_pnl(path: Path) -> tuple[list[PnlLine], list[str], list[SkippedRow]]:
     """
     Load pnl.csv into PnlLine records.
 
-    Returns (lines, problems, excluded_pnl_rows). A row with an unrecognised
+    Returns (lines, problems, excluded_rows). A row with an unrecognised
     category is rejected with a note. A row with an unparseable amount is
     reported and skipped. A row with a blank line_item is loaded under its
     category's unnamed label (see the module docstring). A wholly blank row
     carries no money and is noted and skipped.
 
-    excluded_pnl_rows counts the rows that carried data but could not be
-    loaded, so the totals no longer tie to the source file. Wholly blank
-    rows are not counted. Phase 7 reads this count, never the notes.
+    excluded_rows names (by CSV row and line name) each row that carried
+    data but could not be loaded, so the totals no longer tie to the source
+    file. Wholly blank rows are not among them. The renderer reads these,
+    never the notes.
     """
     lines: list[PnlLine] = []
     problems: list[str] = []
-    excluded = 0
+    excluded: list[SkippedRow] = []
 
     with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
+        reader = _reader(f, PNL_COLUMNS, "P&L")
         for i, row in enumerate(reader, start=2):
             if not any(v.strip() for v in row.values() if isinstance(v, str)):
-                problems.append(f"pnl row {i}: blank row, skipped")
+                problems.append(notes.blank_row(i))
                 continue
 
             line_item = (row.get("line_item") or "").strip()
@@ -118,12 +150,8 @@ def load_pnl(path: Path) -> tuple[list[PnlLine], list[str], int]:
             raw_cat = (row.get("category") or "").strip().lower()
             cat = _CATEGORY_LOOKUP.get(raw_cat)
             if cat is None:
-                named = repr(line_item) if line_item else "an unnamed line"
-                problems.append(
-                    f"pnl row {i}: unrecognised category {raw_cat!r} "
-                    f"for {named}, skipped"
-                )
-                excluded += 1
+                problems.append(notes.unknown_category(i, line_item, raw_cat))
+                excluded.append(SkippedRow(i, line_item))
                 continue
 
             line_item_blank = not line_item
@@ -134,13 +162,12 @@ def load_pnl(path: Path) -> tuple[list[PnlLine], list[str], int]:
             for column in _AMOUNT_COLUMNS:
                 try:
                     amounts[column] = _parse_amount(row.get(column))
-                except ValueError as e:
-                    problems.append(
-                        f"pnl row {i} ({line_item}): {column} {e}, skipped"
-                    )
+                except ValueError:
+                    problems.append(notes.unreadable_amount(i, line_item, column,
+                                                            row.get(column)))
                     break
             if len(amounts) < len(_AMOUNT_COLUMNS):
-                excluded += 1
+                excluded.append(SkippedRow(i, line_item))
                 continue
 
             lines.append(PnlLine(
@@ -180,23 +207,23 @@ def load_kpis(path: Path) -> tuple[list[Kpi], list[str]]:
     problems: list[str] = []
 
     with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
+        reader = _reader(f, KPI_COLUMNS, "KPI")
         for i, row in enumerate(reader, start=2):
             metric = (row.get("metric") or "").strip()
             if not metric:
-                problems.append(f"kpi row {i}: blank metric, skipped")
+                problems.append(notes.kpi_no_name(i))
                 continue
 
             try:
                 actual = _parse_amount(row.get("actual", ""))
-            except ValueError as e:
-                problems.append(f"kpi row {i} ({metric}): actual {e}, skipped")
+            except ValueError:
+                problems.append(notes.kpi_unreadable(i, metric, "actual", row.get("actual")))
                 continue
 
             try:
                 target = _parse_amount(row.get("target", ""))
-            except ValueError as e:
-                problems.append(f"kpi row {i} ({metric}): target {e}, skipped")
+            except ValueError:
+                problems.append(notes.kpi_unreadable(i, metric, "target", row.get("target")))
                 continue
 
             raw_py = (row.get("prior_year") or "").strip()
@@ -204,10 +231,8 @@ def load_kpis(path: Path) -> tuple[list[Kpi], list[str]]:
             if raw_py:
                 try:
                     prior_year = _parse_amount(raw_py)
-                except ValueError as e:
-                    problems.append(
-                        f"kpi row {i} ({metric}): prior_year {e}, skipped"
-                    )
+                except ValueError:
+                    problems.append(notes.kpi_unreadable(i, metric, "prior_year", raw_py))
                     continue
 
             kpis.append(Kpi(
@@ -222,17 +247,25 @@ def load_kpis(path: Path) -> tuple[list[Kpi], list[str]]:
 
 # -- Combined loader ----------------------------------------------------------
 
-def load(pnl_path: Path, kpis_path: Path) -> LoadResult:
+def load(pnl_path: Path, kpis_path: Optional[Path] = None) -> LoadResult:
     """
-    Load both CSV files and return the records, the problems, the count of
+    Load the CSV files and return the records, the problems, the count of
     excluded P&L rows, and the SHA-256 of each file's raw bytes. The hashes
     let the audit show exactly which files produced a pack.
+
+    The KPI file is optional: without one there are no KPIs from a file (the
+    gross margin is still derived from the P&L), a note says so, and its
+    hash is empty.
     """
-    pnl_lines, pnl_problems, excluded_pnl_rows = load_pnl(pnl_path)
-    kpis, kpi_problems = load_kpis(kpis_path)
+    pnl_lines, pnl_problems, excluded_rows = load_pnl(pnl_path)
+    if kpis_path is None:
+        kpis, kpi_problems, kpis_sha256 = [], [NO_KPI_FILE], ""
+    else:
+        kpis, kpi_problems = load_kpis(kpis_path)
+        kpis_sha256 = file_sha256(kpis_path)
     return LoadResult(
-        pnl_lines, kpis, pnl_problems + kpi_problems, excluded_pnl_rows,
-        file_sha256(pnl_path), file_sha256(kpis_path),
+        pnl_lines, kpis, pnl_problems + kpi_problems, len(excluded_rows),
+        file_sha256(pnl_path), kpis_sha256, tuple(excluded_rows),
     )
 
 

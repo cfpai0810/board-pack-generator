@@ -11,8 +11,9 @@ magnitude at a sensible scale (£2.48m, £112k), direction is carried by
 words (above budget, below last year, a loss of) rather than minus signs,
 and a figure that rounds to nothing reads as nothing ("0.0%", never
 "-0.0%"; "in line with budget"). Tables keep whole pounds. The cash KPI is
-stated in thousands, so it is converted to pounds before it is formatted;
-the raw thousands figure never reaches a sentence.
+stated in thousands or in pounds (the run says which), and is converted
+to pounds before it is formatted; a raw thousands figure never reaches a
+sentence.
 
 All rounding is ROUND_HALF_UP, the convention a reader expects, applied
 only here at display. Every helper takes a Decimal and returns a string.
@@ -23,7 +24,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
-from config import CASH_KPI_SCALE
 
 
 # -- Rounding -----------------------------------------------------------------
@@ -48,10 +48,12 @@ def table_money(value: Decimal) -> str:
 
 def prose_money(value: Decimal) -> str:
     """
-    A magnitude for prose: £m to 2dp at or above £1m ('£2.48m'), £k to the
-    nearest thousand at or above £1,000 ('£112k'), whole pounds below that
-    ('£850'). The unit is chosen after rounding, so 999,600 reads '£1.00m'
-    rather than '£1,000k'. No sign: the sentence carries the direction.
+    A magnitude for prose: £bn to 2dp at or above £1bn ('£1.23bn'), £m to
+    2dp at or above £1m ('£2.48m'), £k to the nearest thousand at or above
+    £1,000 ('£112k'), whole pounds below that ('£850'). The unit is chosen
+    after rounding, so 999,600 reads '£1.00m' rather than '£1,000k', and
+    999,996,000 reads '£1.00bn' rather than '£1,000.00m'. No sign: the
+    sentence carries the direction.
     """
     magnitude = value.copy_abs()
     pounds = _round(magnitude, 0)
@@ -60,17 +62,20 @@ def prose_money(value: Decimal) -> str:
     thousands = _round(magnitude.scaleb(-3), 0)
     if thousands < 1000:
         return f"£{thousands:,}k"
-    return f"£{_round(magnitude.scaleb(-6), 2):,}m"
+    millions = _round(magnitude.scaleb(-6), 2)
+    if millions < 1000:
+        return f"£{millions:,}m"
+    return f"£{_round(magnitude.scaleb(-9), 2):,}bn"
 
 
-def cash_pounds(value: Decimal) -> Decimal:
-    """The cash KPI (stated in thousands) in pounds."""
-    return value * CASH_KPI_SCALE
+def cash_pounds(value: Decimal, scale) -> Decimal:
+    """The cash KPI in pounds, given what one unit of it is worth (1000 for thousands, 1 for pounds)."""
+    return value * scale
 
 
-def prose_cash(value: Decimal) -> str:
-    """Cash KPI figure for prose: 1,176 (thousands) reads '£1.18m'."""
-    return prose_money(cash_pounds(value))
+def prose_cash(value: Decimal, scale) -> str:
+    """Cash KPI figure for prose: 1,176 in thousands, or 1,176,000 in pounds, reads '£1.18m'."""
+    return prose_money(cash_pounds(value, scale))
 
 
 def profit_phrase(value: Decimal, qualifier: str = "") -> str:

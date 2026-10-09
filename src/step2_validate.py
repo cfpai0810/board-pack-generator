@@ -24,6 +24,8 @@ warnings it raises, so an empty list means the check passed.
 
 from __future__ import annotations
 
+from src import notes
+from src.notes import MAX_NAME_LENGTH
 from src.state import SUBTOTALS, Category, Kpi, PnlLine
 
 _COST_CATEGORIES = (Category.COGS, Category.OPEX)
@@ -41,24 +43,29 @@ def categories_recognised(pnl_lines: list[PnlLine]) -> list[str]:
     out of every subtotal without anyone noticing.
     """
     return [
-        f"pnl ({line.line_item or 'unnamed line'}): unrecognised category "
-        f"{line.category!r}, kept but it rolls into no subtotal"
+        notes.odd_category(line.line_item, line.category)
         for line in pnl_lines
         if not isinstance(line.category, Category)
     ]
 
 
+def _category_word(category) -> str:
+    if category is Category.COGS:
+        return "COGS"
+    return category.value if isinstance(category, Category) else str(category)
+
+
 def line_items_present(pnl_lines: list[PnlLine]) -> list[str]:
     """
-    Warn on any line whose source line_item was blank.
+    Warn once per category on the lines whose source line_item was blank.
 
     On the CSV path step1 has already labelled such a line and set
     line_item_blank, so the flag is checked as well as the text. The line
     is kept: its amounts still belong in the subtotals, it just has no real
-    name for the commentary. The warning names it by the same unnamed label
-    the pack shows, plus its actuals so the preparer can find it.
+    name for the commentary. The note gives the label the pack shows it
+    under, so the preparer can find it in the table.
     """
-    warnings = []
+    labels: dict[str, list[str]] = {}
     for line in pnl_lines:
         if line.line_item_blank or not (line.line_item or "").strip():
             if (line.line_item or "").strip():
@@ -67,10 +74,8 @@ def line_items_present(pnl_lines: list[PnlLine]) -> list[str]:
                 label = line.category.unnamed_label
             else:
                 label = f"Unnamed {line.category} line"
-            warnings.append(
-                f"pnl ({label}, actuals {line.actuals}): blank line_item, kept"
-            )
-    return warnings
+            labels.setdefault(_category_word(line.category), []).append(label)
+    return [notes.unnamed_lines(word, names) for word, names in labels.items()]
 
 
 def _name_key(name: str) -> str:
@@ -90,11 +95,8 @@ def line_names_unique(pnl_lines: list[PnlLine]) -> list[str]:
     for line in pnl_lines:
         if (line.line_item or "").strip():
             counts.setdefault(_name_key(line.line_item), []).append(line.line_item)
-    return [
-        f"pnl ({names[0]}): {len(names)} lines share this name, kept as "
-        f"separate lines"
-        for names in counts.values() if len(names) > 1
-    ]
+    return [notes.shared_name(names[0], len(names))
+            for names in counts.values() if len(names) > 1]
 
 
 def line_names_not_subtotals(pnl_lines: list[PnlLine]) -> list[str]:
@@ -106,9 +108,7 @@ def line_names_not_subtotals(pnl_lines: list[PnlLine]) -> list[str]:
     """
     subtotal_names = {_name_key(name): name for _, name in SUBTOTALS}
     return [
-        f"pnl ({line.line_item}): same name as the "
-        f"{subtotal_names[_name_key(line.line_item)]} subtotal, kept as a "
-        f"separate line"
+        notes.subtotal_name(line.line_item, subtotal_names[_name_key(line.line_item)])
         for line in pnl_lines
         if (line.line_item or "").strip()
         and _name_key(line.line_item) in subtotal_names
@@ -125,10 +125,7 @@ def has_revenue(pnl_lines: list[PnlLine]) -> list[str]:
     """
     if any(line.category is Category.REVENUE for line in pnl_lines):
         return []
-    return [
-        "pnl: no revenue line, so the revenue subtotal is nil "
-        "and gross margin cannot be computed"
-    ]
+    return [notes.no_revenue()]
 
 
 def has_costs(pnl_lines: list[PnlLine]) -> list[str]:
@@ -140,10 +137,20 @@ def has_costs(pnl_lines: list[PnlLine]) -> list[str]:
     """
     if any(line.category in _COST_CATEGORIES for line in pnl_lines):
         return []
-    return [
-        "pnl: no cost line (cogs or opex), so gross profit "
-        "and EBIT will simply equal revenue"
-    ]
+    return [notes.no_costs()]
+
+
+def names_not_too_long(pnl_lines: list[PnlLine], kpis: list[Kpi]) -> list[str]:
+    """
+    Warn on a line or KPI name longer than 60 characters. It is kept, and the
+    PDF wraps it inside its column rather than widening the table, but a
+    board reads short labels faster, so the preparer may want to shorten it.
+    """
+    warnings = [notes.long_name(notes.PNL, line.line_item)
+                for line in pnl_lines if len(line.line_item or "") > MAX_NAME_LENGTH]
+    warnings += [notes.long_name(notes.KPI_FILE, kpi.metric)
+                 for kpi in kpis if len(kpi.metric or "") > MAX_NAME_LENGTH]
+    return warnings
 
 
 # -- KPI checks ---------------------------------------------------------------
@@ -157,11 +164,7 @@ def kpis_have_actuals(kpis: list[Kpi]) -> list[str]:
     table still shows the metric and its target; step3 must treat its
     deltas as not computable.
     """
-    return [
-        f"kpi ({kpi.metric or 'unnamed metric'}): missing actual, kept"
-        for kpi in kpis
-        if kpi.actual is None
-    ]
+    return [notes.kpi_no_actual(kpi.metric) for kpi in kpis if kpi.actual is None]
 
 
 # -- Orchestrator -------------------------------------------------------------
@@ -186,4 +189,5 @@ def validate(
     problems.extend(has_revenue(pnl_lines))
     problems.extend(has_costs(pnl_lines))
     problems.extend(kpis_have_actuals(kpis))
+    problems.extend(names_not_too_long(pnl_lines, kpis))
     return problems

@@ -51,15 +51,11 @@ sys.path.insert(0, str(ROOT))
 from src.state import SUBTOTALS, Category, Kpi, PackStatus, PnlLine, SectionType
 
 
-# Exact warning strings step2 raises, so a test fails if the wording drifts.
-NO_REVENUE = (
-    "pnl: no revenue line, so the revenue subtotal is nil "
-    "and gross margin cannot be computed"
-)
-NO_COSTS = (
-    "pnl: no cost line (cogs or opex), so gross profit "
-    "and EBIT will simply equal revenue"
-)
+# Exact note strings step2 raises, so a test fails if the wording drifts.
+NO_REVENUE = ("P&L: there is no revenue line, so revenue is nil and the gross margin "
+              "cannot be computed.")
+NO_COSTS = ("P&L: there is no cost line (COGS or opex), so gross profit and EBIT "
+            "equal revenue.")
 
 
 def _line(line_item, category, actuals):
@@ -182,7 +178,8 @@ class TestLoad:
         lines, problems, _ = load_pnl(pnl)
         assert [l.line_item for l in lines] == ["Retail"]
         assert problems == [
-            "pnl row 3: unrecognised category 'tax' for 'Corporation tax', skipped"
+            "P&L row 3 (Corporation tax): the category 'tax' is not revenue, cogs or opex, "
+            "so the row was left out."
         ]
 
     @pytest.mark.parametrize("raw, expected", [
@@ -218,7 +215,7 @@ class TestLoad:
         lines, problems, _ = load_pnl(pnl)
         assert lines == []
         assert problems == [
-            "pnl row 2 (Retail): actuals cannot parse amount: 'n/a', skipped"
+            "P&L row 2 (Retail): the actual 'n/a' could not be read, so the row was left out."
         ]
 
     def test_short_row_is_noted_not_a_crash(self, tmp_path):
@@ -230,7 +227,7 @@ class TestLoad:
         )
         lines, problems, _ = load_pnl(pnl)
         assert lines == []
-        assert problems == ["pnl row 2 (Retail): budget blank amount, skipped"]
+        assert problems == ["P&L row 2 (Retail): the budget is blank, so the row was left out."]
 
     def test_nameless_row_is_loaded_and_labelled(self, tmp_path):
         from src.step1_load import load_pnl
@@ -265,7 +262,7 @@ class TestLoad:
         ])
         lines, problems, _ = load_pnl(pnl)
         assert len(lines) == 2
-        assert problems == ["pnl row 3: blank row, skipped"]
+        assert problems == ["P&L row 3: the row is empty, so it was ignored."]
 
     def test_kpi_prior_year_is_optional(self, tmp_path):
         from src.step1_load import load_kpis
@@ -282,7 +279,8 @@ class TestLoad:
         _write_csv(kpis, KPI_HEADER, [["Headcount", "", "205", "198"]])
         loaded, problems = load_kpis(kpis)
         assert loaded == []
-        assert problems == ["kpi row 2 (Headcount): actual blank amount, skipped"]
+        assert problems == [
+            "KPI file row 2 (Headcount): the actual is blank, so the KPI was left out."]
 
 
 # ── VALIDATE ──────────────────────────────────────────────────────────
@@ -311,7 +309,7 @@ class TestValidate:
         lines[1].line_item = ""
         problems = validate(lines, _clean_kpis(), [])
         assert problems == [
-            "pnl (Unnamed COGS line, actuals 942310): blank line_item, kept"
+            "P&L: one COGS line has no name; it is kept as 'Unnamed COGS line'."
         ]
         assert len(lines) == 3
         assert lines[1].actuals == Decimal("942310")
@@ -320,7 +318,7 @@ class TestValidate:
         from src.step2_validate import line_items_present
         line = _line("   ", Category.OPEX, 50000)
         assert line_items_present([line]) == [
-            "pnl (Unnamed opex line, actuals 50000): blank line_item, kept"
+            "P&L: one opex line has no name; it is kept as 'Unnamed opex line'."
         ]
 
     def test_kpi_missing_actual_warns_and_kpi_kept(self):
@@ -328,7 +326,8 @@ class TestValidate:
         kpis = _clean_kpis()
         kpis[1].actual = None
         problems = validate(_clean_pnl(), kpis, [])
-        assert problems == ["kpi (Cash balance (GBP 000s)): missing actual, kept"]
+        assert problems == [
+            "KPIs: 'Cash balance (GBP 000s)' has no actual; it is kept, without comparisons."]
         assert len(kpis) == 2
 
     def test_no_revenue_line_warns(self):
@@ -362,8 +361,8 @@ class TestValidate:
         ]
         problems = validate(lines, _clean_kpis(), [])
         assert problems == [
-            "pnl (Corporation tax): unrecognised category 'tax', "
-            "kept but it rolls into no subtotal",
+            "P&L: the line 'Corporation tax' has the category 'tax', which is not revenue, "
+            "cogs or opex; it is kept but counts in no subtotal.",
             NO_COSTS,
         ]
         assert len(lines) == 2
@@ -422,7 +421,7 @@ class TestValidate:
         result = load(pnl, KPIS_PATH)
         problems = validate(result.pnl_lines, result.kpis, result.problems)
         assert problems == [
-            "pnl (Unnamed COGS line, actuals 942310): blank line_item, kept"
+            "P&L: one COGS line has no name; it is kept as 'Unnamed COGS line'."
         ]
         assert len(result.pnl_lines) == 3
 
@@ -438,7 +437,8 @@ class TestValidate:
         result = load(PNL_PATH, kpis)
         problems = validate(result.pnl_lines, result.kpis, result.problems)
         assert problems == [
-            "kpi row 3 (Cash balance (GBP 000s)): actual blank amount, skipped"
+            "KPI file row 3 (Cash balance (GBP 000s)): the actual is blank, so the KPI "
+            "was left out."
         ]
 
 
@@ -622,8 +622,8 @@ class TestCompute:
         assert line.var_budget_pct is None
         assert line.var_py_pct == Decimal("25")
         assert notes == [
-            "pnl (New channel): budget is zero, so the % variance "
-            "vs budget is not meaningful"
+            "P&L: the line 'New channel' has a zero budget, so its % variance against "
+            "budget is not meaningful (n/m)."
         ]
 
     def test_zero_prior_year_gives_none_pct_and_a_note(self):
@@ -635,8 +635,8 @@ class TestCompute:
         assert line.var_py_abs == Decimal("12500")
         assert line.var_py_pct is None
         assert notes == [
-            "pnl (New channel): prior year is zero, so the % variance "
-            "vs prior year is not meaningful"
+            "P&L: the line 'New channel' has a zero prior year, so its % variance against "
+            "the prior year is not meaningful (n/m)."
         ]
 
     def test_zero_revenue_gives_none_margin_and_a_note(self):
@@ -650,12 +650,12 @@ class TestCompute:
         assert s.revenue_actual == Decimal("0")
         assert s.ebit_actual == Decimal("-1239950")
         assert notes == [
-            "pnl: revenue is zero (actual, budget and prior year), "
-            "so gross margin cannot be computed for those columns",
-            "pnl (Revenue subtotal): budget is zero, so the % variance "
-            "vs budget is not meaningful",
-            "pnl (Revenue subtotal): prior year is zero, so the % variance "
-            "vs prior year is not meaningful",
+            "P&L: revenue is zero in the actual, budget and prior year columns, so the "
+            "gross margin cannot be computed there.",
+            "P&L: the Revenue subtotal has a zero budget, so its % variance against "
+            "budget is not meaningful (n/m).",
+            "P&L: the Revenue subtotal has a zero prior year, so its % variance against "
+            "the prior year is not meaningful (n/m).",
         ]
 
     def test_zero_revenue_in_one_column_only(self):
@@ -667,8 +667,8 @@ class TestCompute:
         assert s.gross_margin_actual == Decimal("100")
         assert s.gross_margin_py is None
         assert notes[0] == (
-            "pnl: revenue is zero (prior year), "
-            "so gross margin cannot be computed for that column"
+            "P&L: revenue is zero in the prior year column, so the gross margin cannot "
+            "be computed there."
         )
 
     def test_zero_comparator_note_reaches_the_problems_list(self):
@@ -681,8 +681,8 @@ class TestCompute:
         result = compute(lines, _clean_kpis(), problems)
         assert result.problems is problems
         assert problems[0] == "earlier note"
-        assert ("pnl (New channel): budget is zero, so the % variance "
-                "vs budget is not meaningful") in problems
+        assert ("P&L: the line 'New channel' has a zero budget, so its % variance "
+                "against budget is not meaningful (n/m).") in problems
 
     # -- KPIs ---------------------------------------------------------------
 
@@ -753,8 +753,8 @@ class TestCompute:
         margins = [k for k in result.kpis if k.is_metric("Gross margin (%)")]
         assert len(margins) == 1 and margins[0].derived
         assert result.problems == [
-            "kpi (Gross margin %): input row ignored, the gross margin "
-            "computed from the P&L was used instead"
+            "KPI file: the row 'Gross margin %' was ignored; the gross margin shown is "
+            "computed from the P&L."
         ]
 
     def test_no_derived_kpi_when_revenue_is_zero(self):
@@ -762,8 +762,8 @@ class TestCompute:
         lines = [_line("Ingredients", Category.COGS, 942310)]
         result = compute(lines, _clean_kpis(), [])
         assert not any(k.derived for k in result.kpis)
-        assert ("kpi (Gross margin (%)): not shown, as the actual or budget "
-                "gross margin could not be computed") in result.problems
+        assert ("KPIs: the gross margin is not shown, because the actual or budget "
+                "margin could not be computed.") in result.problems
 
     def test_kpi_metric_matching_ignores_case_spaces_and_punctuation(self):
         kpi = Kpi(metric="Gross Margin %", actual=Decimal("1"), target=Decimal("1"))
@@ -1081,8 +1081,8 @@ class TestAssemble:
         figures = _section(p, SectionType.CASH).figures
         assert figures["supplied"] is False
         assert figures["note"] == "No cash balance was supplied."
-        assert ("kpi (Cash balance (GBP 000s)): not supplied, so the cash "
-                "section shows no balance") in p.warnings
+        assert ("KPI file: there is no cash balance row, so the cash section shows "
+                "no balance.") in p.warnings
 
     def test_excluded_rows_flow_into_the_pack(self, tmp_path):
         from config import KPIS_PATH
@@ -1098,8 +1098,9 @@ class TestAssemble:
         loaded = load(pnl, KPIS_PATH)
         c = compute(loaded.pnl_lines, loaded.kpis, loaded.problems)
         p = assemble(c.pnl_lines, c.kpis, c.subtotals, c.problems,
-                     loaded.excluded_pnl_rows)
+                     loaded.excluded_pnl_rows, excluded_rows=loaded.excluded_rows)
         assert p.excluded_pnl_rows == 1
+        assert [(r.row, r.name) for r in p.excluded_rows] == [(3, "Export")]
         assert p.warnings is c.problems
 
 
@@ -1126,7 +1127,8 @@ class TestItemKeys:
         assert _names(p, f.pnl_commentary_items) == ["Revenue"]
         assert len(set(f.all_material)) == len(f.all_material) == 4
         assert warnings == [
-            "pnl (Revenue): same name as the Revenue subtotal, kept as a separate line"
+            "P&L: the line 'Revenue' has the same name as the Revenue subtotal; it is kept "
+            "as a separate line."
         ]
 
     def test_two_lines_with_the_same_name_stay_separate(self):
@@ -1141,7 +1143,8 @@ class TestItemKeys:
         assert _names(p, f.pnl_commentary_items) == ["Retail", "Retail"]
         assert [p.item(k)["actual"] for k in f.pnl_commentary_items] == [
             Decimal("900000"), Decimal("400000")]
-        assert warnings == ["pnl (Retail): 2 lines share this name, kept as separate lines"]
+        assert warnings == [
+            "P&L: two lines are called 'Retail'; they are kept as separate lines."]
 
     def test_name_checks_ignore_case_and_spacing(self):
         from src.step2_validate import line_names_not_subtotals, line_names_unique
@@ -1149,10 +1152,10 @@ class TestItemKeys:
                  _line("retail", Category.REVENUE, 1),
                  _line("Retail ", Category.REVENUE, 1)]
         assert line_names_not_subtotals(lines) == [
-            "pnl (Gross  profit): same name as the Gross profit subtotal, "
-            "kept as a separate line"]
+            "P&L: the line 'Gross  profit' has the same name as the Gross profit subtotal; "
+            "it is kept as a separate line."]
         assert line_names_unique(lines) == [
-            "pnl (retail): 2 lines share this name, kept as separate lines"]
+            "P&L: two lines are called 'retail'; they are kept as separate lines."]
 
     def test_sample_has_no_name_warnings(self):
         from config import PNL_PATH
@@ -1178,9 +1181,9 @@ class TestItemKeys:
             "Retail", "Unnamed COGS line 1", "Unnamed COGS line 2", "Unnamed opex line"]
         problems = validate(loaded.pnl_lines, loaded.kpis, loaded.problems)
         assert problems == [
-            "pnl (Unnamed COGS line 1, actuals 300): blank line_item, kept",
-            "pnl (Unnamed COGS line 2, actuals 200): blank line_item, kept",
-            "pnl (Unnamed opex line, actuals 100): blank line_item, kept",
+            "P&L: two COGS lines have no name; they are kept as 'Unnamed COGS line 1' and "
+            "'Unnamed COGS line 2'.",
+            "P&L: one opex line has no name; it is kept as 'Unnamed opex line'.",
         ]
 
 
@@ -1196,16 +1199,20 @@ class TestFormatting:
 
     @pytest.mark.parametrize("value, expected", [
         ("2477550", "£2.48m"), ("112450", "£112k"), ("-46120", "£46k"), ("850", "£850"),
-        ("999600", "£1.00m"), ("999.6", "£1k"), ("1000", "£1k"), ("1234567890", "£1,234.57m"),
+        ("999600", "£1.00m"), ("999.6", "£1k"), ("1000", "£1k"), ("1234567890", "£1.23bn"),
+        ("999994999", "£999.99m"), ("999996000", "£1.00bn"), ("1000000000", "£1.00bn"),
+        ("-2345678901", "£2.35bn"), ("12345678901234", "£12,345.68bn"),
     ])
     def test_prose_money(self, value, expected):
         from src.formatting import prose_money
         assert prose_money(Decimal(value)) == expected
 
-    def test_cash_is_converted_from_thousands(self):
+    def test_cash_is_converted_by_the_runs_scale(self):
         from src.formatting import prose_cash
-        assert prose_cash(Decimal("1176")) == "£1.18m"
-        assert prose_cash(Decimal("-174")) == "£174k"
+        assert prose_cash(Decimal("1176"), 1000) == "£1.18m"
+        assert prose_cash(Decimal("-174"), 1000) == "£174k"
+        assert prose_cash(Decimal("1176000"), 1) == "£1.18m"
+        assert prose_cash(Decimal("1176000"), 1000) == "£1.18bn"     # why the scale is an input
 
     @pytest.mark.parametrize("value, signed, expected", [
         ("-0.0004", False, "0.0%"), ("-0.0004", True, "0.0%"), ("-4.3416", False, "4.3%"),
@@ -1460,30 +1467,30 @@ class TestNarrateModel:
     def test_raising_client_falls_back_with_a_warning(self):
         p = self._run(FakeClient(error=ConnectionError("offline")))
         assert [s.drafted_by for s in p.sections] == ["template"] * 4
-        assert p.warnings == ["narrate: the model call failed (ConnectionError), "
-                              "so every section uses the template"]
+        assert p.warnings == ["Commentary: the model call failed (ConnectionError), so "
+                              "the template drafted every section."]
         assert p.narrative_model == ""
 
     def test_malformed_json_falls_back_with_a_warning(self):
         p = self._run(FakeClient('{"exec_summary": "Revenue was'))
         assert [s.drafted_by for s in p.sections] == ["template"] * 4
-        assert p.warnings == ["narrate: the model response was not valid JSON, "
-                              "so every section uses the template"]
+        assert p.warnings == ["Commentary: the model's reply could not be read, so the "
+                              "template drafted every section."]
         assert p.narrative_input_tokens == 1840   # tokens were still spent
 
     def test_refusal_falls_back_with_a_warning(self):
         p = self._run(FakeClient("", stop_reason="refusal"))
         assert [s.drafted_by for s in p.sections] == ["template"] * 4
-        assert p.warnings == ["narrate: the model declined the request, "
-                              "so every section uses the template"]
+        assert p.warnings == ["Commentary: the model declined the request, so the "
+                              "template drafted every section."]
 
     def test_missing_section_falls_back_alone(self):
         sections = {k: v for k, v in MODEL_SECTIONS.items() if k != "cash"}
         p = self._run(FakeClient(json.dumps(sections)))
         assert [s.drafted_by for s in p.sections] == ["model", "model", "model", "template"]
         assert p.section(SectionType.CASH).narrative.startswith("The cash balance was £1.18m")
-        assert p.warnings == ["narrate (cash): missing from the model response, "
-                              "so the template was used"]
+        assert p.warnings == ["Commentary: the model's reply had no Cash balance "
+                              "section, so the template drafted it."]
 
     def test_invented_figure_raises_a_numeric_warning(self):
         sections = dict(MODEL_SECTIONS, exec_summary="Revenue was £3.1m, a 7.2% fall.")
@@ -1782,11 +1789,13 @@ class TestReview:
         loaded = load(pnl, KPIS_PATH)
         c = compute(loaded.pnl_lines, loaded.kpis, loaded.problems)
         p = narrate(assemble(c.pnl_lines, c.kpis, c.subtotals, c.problems,
-                             loaded.excluded_pnl_rows))
+                             loaded.excluded_pnl_rows, excluded_rows=loaded.excluded_rows))
         script = Script(answer=False)
         _run_review(p, script, tmp_path / "out")
-        assert ("The totals exclude 2 P&L rows that could not be loaded, so they do "
-                "not tie to the source file.") in script.summaries[0]
+        assert ("These totals exclude 2 rows of the source file that could not be read: "
+                "Export (row 3) and Corporation tax (row 4).") in script.summaries[0]
+        assert _audit_lines(tmp_path / "out")[0]["inputs"]["excluded_rows"] == [
+            {"row": 3, "name": "Export"}, {"row": 4, "name": "Corporation tax"}]
 
     def test_review_on_a_final_pack_raises(self, tmp_path):
         from src.step6_review import AlreadySignedOff
@@ -2211,9 +2220,10 @@ class TestRender:
         loaded = load(pnl, KPIS_PATH)
         c = compute(loaded.pnl_lines, loaded.kpis, loaded.problems)
         p = narrate(assemble(c.pnl_lines, c.kpis, c.subtotals, c.problems,
-                             loaded.excluded_pnl_rows))
+                             loaded.excluded_pnl_rows, excluded_rows=loaded.excluded_rows))
         text = _flat(_pdf_pages(render(p)))
-        notice = "These totals exclude 2 rows of the source file that could not be read."
+        notice = ("These totals exclude 2 rows of the source file that could not be read: "
+                  "Export (row 3) and Corporation tax (row 4).")
         assert notice in text
         assert text.index(notice) < text.index("Fav/(Adv) vs budget")
         assert "These totals exclude" not in _flat(_pdf_pages(final_pdf))
@@ -2600,15 +2610,17 @@ class TestSharedTables:
             ("", "Marketing", "(37,640)"), ("", "Ingredients", "(37,310)")]
 
     def test_the_notes_travel_with_the_rows(self, pack, final_pdf):
-        from src.tables import CASH_NOTE, DRIVERS_NOTE, KPI_NOTE, pnl_notes
+        from src.tables import DRIVERS_NOTE, KPI_NOTE, cash_note, pnl_notes
         notes = pnl_notes(pack)
         assert notes[0].startswith("* Material: a variance against budget of £50,000 or 10.0%")
         assert notes[1] == ("Figures are calculated before rounding, so totals and "
                             "differences may not add exactly.")
         assert notes[2].startswith("Fav/(Adv): favourable variances")
         text = _flat(_pdf_pages(final_pdf))
-        for note in [*notes, DRIVERS_NOTE, KPI_NOTE, CASH_NOTE]:
+        for note in [*notes, DRIVERS_NOTE, KPI_NOTE, cash_note(pack)]:
             assert note in text, note
+        assert cash_note(pack) == ("Converted to pounds from the KPI file, which states "
+                                   "cash in thousands.")
 
     def test_the_pdf_draws_the_shared_rows(self, final_pack):
         from src.step7_render import _pnl_table
@@ -2763,3 +2775,553 @@ class TestPipelineSurface:
         assert flag.detail == "'£1.46m' matches no figure in the pack"
         assert flag.message == ("Profit and loss: '£1.46m' matches no figure in the pack "
                                 "(in the reviewer's text)")
+
+
+# ── W3: YOUR OWN DATA, THRESHOLDS AND THE MODEL ───────────────────────
+
+def _own_run(tmp_path, pnl=None, kpis="sample", **kwargs):
+    """run_pipeline as a draft, on the sample files unless others are given."""
+    from config import KPIS_PATH, PNL_PATH
+    from src.pipeline import run_pipeline
+    return run_pipeline(pnl or PNL_PATH, KPIS_PATH if kpis == "sample" else kpis,
+                        tmp_path / "out", draft_only=True, **kwargs)
+
+
+def _sample_rows(path):
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        return list(csv.reader(fh))
+
+
+def _dates_and_runs(text: str) -> str:
+    """Drop what differs between two runs of the same inputs: times and run ids."""
+    text = re.sub(r"\d{1,2} \w+ \d{4} at \d\d:\d\d UTC", "<when>", text)
+    return re.sub(r"Review run: [0-9a-f]{32}\.", "", text)
+
+
+@pytest.fixture(scope="module")
+def test_co(tmp_path_factory):
+    """The sample files run for Test Co, September 2026, and signed."""
+    from src.pipeline import review_and_save
+    tmp = tmp_path_factory.mktemp("testco")
+    draft = _own_run(tmp, entity="  Test Co ", period="September 2026")
+    signed = review_and_save(draft.pack, tmp / "out", edits={}, reviewer="A. Controller",
+                             sign_word="SIGN")
+    return signed, tmp / "out"
+
+
+class TestOwnData:
+    # -- entity and period come from the run, not config --------------------
+
+    def test_the_header_file_name_and_governance_show_the_run(self, test_co):
+        result, _ = test_co
+        pack = result.pack
+        assert (pack.entity, pack.period) == ("Test Co", "September 2026")
+        assert result.pdf_path.name == "test_co_2026_09_board_pack_FINAL.pdf"
+        pages = _pdf_pages(result.pdf_path.read_bytes())
+        assert pages[0].lstrip().startswith("Test Co")
+        assert "Monthly management pack, September 2026" in _flat(pages)
+        assert "Entity and period: Test Co, September 2026." in _flat(pages)
+
+    def test_nothing_says_harmwell_or_june(self, test_co):
+        result, out = test_co
+        text = _flat(_pdf_pages(result.pdf_path.read_bytes()))
+        audit = result.audit_path.read_text(encoding="utf-8")
+        for stale in ("Harmwell", "June", "harmwell", "2026_06"):
+            assert stale not in text and stale not in audit, stale
+        assert {json.loads(l)["period"] for l in audit.splitlines()
+                if "period" in json.loads(l)} == {"September 2026"}
+
+    def test_the_period_is_not_a_figure(self, test_co):
+        from src.pipeline import NUMERIC, check_text
+        pack = test_co[0].pack
+        text = "The September 2026 results for Test Co are set out below."
+        assert [f for f in check_text(pack, "exec_summary", text) if f.kind == NUMERIC] == []
+        stale = [f.text for f in check_text(pack, "exec_summary", "As in June 2026.")]
+        assert stale == ["2026"]                   # another period is not exempt
+
+    def test_the_sample_as_own_files_matches_the_sample_run(self, tmp_path):
+        from src.pipeline import review_and_save
+        texts = []
+        for i, names in enumerate([{}, {"entity": "Harmwell Foods Ltd", "period": "June 2026"}]):
+            draft = _own_run(tmp_path / str(i), **names)
+            signed = review_and_save(draft.pack, tmp_path / str(i) / "out", edits={},
+                                     reviewer="A. Controller", sign_word="SIGN")
+            texts.append((signed.pdf_path.name,
+                          _dates_and_runs(_flat(_pdf_pages(signed.pdf_path.read_bytes())))))
+        assert texts[0] == texts[1]
+        assert texts[0][0] == "harmwell_foods_2026_06_board_pack_FINAL.pdf"
+
+    @pytest.mark.parametrize("names", [{"entity": "  "}, {"period": ""}])
+    def test_a_blank_entity_or_period_is_refused(self, tmp_path, names):
+        from src.pipeline import PipelineError
+        with pytest.raises(PipelineError, match="is blank"):
+            _own_run(tmp_path, **names)
+        assert not (tmp_path / "out").exists()
+
+    # -- cash in pounds or thousands ----------------------------------------
+
+    def _pounds_kpis(self, tmp_path, metric="Cash balance (GBP)"):
+        path = tmp_path / "kpis_pounds.csv"
+        _write_csv(path, KPI_HEADER, [["Headcount", "214", "205", "198"],
+                                      [metric, "1176000", "1350000", "1288000"]])
+        return path
+
+    def test_cash_stated_in_pounds(self, tmp_path):
+        result = _own_run(tmp_path, kpis=self._pounds_kpis(tmp_path), cash_scale=1)
+        pack = result.pack
+        cash = pack.section(SectionType.CASH)
+        assert cash.figures["supplied"] and pack.cash_scale == 1
+        assert "£1.18m" in cash.narrative and "bn" not in cash.narrative
+        assert pack.numeric_warnings == []
+        text = _flat(_pdf_pages(result.pdf_path.read_bytes()))
+        assert "Cash balance 1,176,000 1,350,000 1,288,000 (174,000) (112,000)" in text
+        assert "Stated in pounds, as in the KPI file." in text
+        assert _audit_lines(tmp_path / "out")[0]["inputs"]["cash_scale"] == 1
+
+    def test_the_same_file_read_as_thousands_is_a_thousand_times_larger(self, tmp_path):
+        pack = _own_run(tmp_path, kpis=self._pounds_kpis(tmp_path), cash_scale=1000).pack
+        assert "£1.18bn" in pack.section(SectionType.CASH).narrative
+
+    @pytest.mark.parametrize("metric", ["Cash balance", "Cash balance (GBP)", "cash balance (£)"])
+    def test_the_cash_kpi_is_found_whatever_its_unit(self, tmp_path, metric):
+        pack = _own_run(tmp_path, kpis=self._pounds_kpis(tmp_path, metric), cash_scale=1).pack
+        assert pack.section(SectionType.CASH).figures["supplied"]
+        assert [k["metric"] for k in pack.section(SectionType.KPIS).figures["kpis"]] == [
+            "Headcount", "Gross margin (%)"]
+
+    def test_the_cash_scale_must_be_a_known_unit(self, tmp_path):
+        from src.pipeline import CASH_UNITS, PipelineError
+        assert CASH_UNITS == {"thousands": 1000, "pounds": 1}
+        with pytest.raises(PipelineError, match="thousands or in pounds"):
+            _own_run(tmp_path, cash_scale=100)
+
+    # -- no KPI file ----------------------------------------------------------
+
+    def test_no_kpi_file(self, tmp_path):
+        from src.step1_load import NO_KPI_FILE
+        result = _own_run(tmp_path, kpis=None)
+        pack = result.pack
+        assert [k["metric"] for k in pack.section(SectionType.KPIS).figures["kpis"]] == [
+            "Gross margin (%)"]
+        cash = pack.section(SectionType.CASH)
+        assert not cash.figures["supplied"]
+        assert cash.narrative == "No cash balance was supplied."
+        assert pack.kpis_sha256 == "" and not pack.kpis_supplied
+        assert NO_KPI_FILE in result.data_notes
+        inputs = _audit_lines(tmp_path / "out")[0]["inputs"]
+        assert (inputs["kpis_sha256"], inputs["kpis_supplied"]) == ("", False)
+        assert result.data_notes == [NO_KPI_FILE]          # it covers the cash balance too
+        text = _flat(_pdf_pages(result.pdf_path.read_bytes()))
+        assert "KPIs not supplied (no KPI file)." in text
+        assert "No cash balance was supplied." in text and "Headcount" not in text
+        assert pack.numeric_warnings == []
+
+    # -- thresholds ------------------------------------------------------------
+
+    def test_45k_puts_opex_in_the_executive_summary(self, tmp_path):
+        from src.pipeline import parse_materiality
+        abs_, pct_ = parse_materiality("45,000", "10")
+        pack = _own_run(tmp_path, materiality_abs=abs_, materiality_pct=pct_).pack
+        assert "Opex" in _names(pack, pack.material_flags.exec_summary_items)
+        default = _own_run(tmp_path / "default").pack
+        assert "Opex" not in _names(default, default.material_flags.exec_summary_items)
+
+    @pytest.mark.parametrize("abs_text, pct_text, expected", [
+        ("50000", "10", ("50000", "10")), ("£50,000", "10%", ("50000", "10")),
+        (" 45,000 ", " 7.5 ", ("45000", "7.5")), ("1", "100", ("1", "100"))])
+    def test_parse_materiality(self, abs_text, pct_text, expected):
+        from src.pipeline import parse_materiality
+        assert parse_materiality(abs_text, pct_text) == tuple(Decimal(v) for v in expected)
+
+    @pytest.mark.parametrize("abs_text, pct_text, says", [
+        ("0", "10", "absolute"), ("-5000", "10", "absolute"), ("fifty", "10", "absolute"),
+        ("", "10", "absolute"), ("NaN", "10", "absolute"), ("1e5", "10", "absolute"),
+        ("50000", "0", "percentage"), ("50000", "101", "percentage"),
+        ("50000", "", "percentage"), ("50000", "-3", "percentage")])
+    def test_parse_materiality_refuses(self, abs_text, pct_text, says):
+        from src.pipeline import PipelineError, parse_materiality
+        with pytest.raises(PipelineError, match=f"The {says} threshold"):
+            parse_materiality(abs_text, pct_text)
+
+    @pytest.mark.parametrize("thresholds", [
+        {"materiality_abs": Decimal("0")}, {"materiality_pct": Decimal("100.5")}])
+    def test_run_pipeline_checks_the_thresholds_too(self, tmp_path, thresholds):
+        from src.pipeline import PipelineError
+        with pytest.raises(PipelineError, match="threshold"):
+            _own_run(tmp_path, **thresholds)
+
+    # -- files a person can fix: plain messages, nothing written ---------------
+
+    def test_a_missing_pnl_column_is_named(self, tmp_path):
+        from src.pipeline import PipelineError
+        path = tmp_path / "pnl.csv"
+        _write_csv(path, ["line_item", "category", "actuals", "prior_year"],
+                   [["Retail", "revenue", "100", "90"]])
+        with pytest.raises(PipelineError, match="The P&L file is missing the column budget"):
+            _own_run(tmp_path, pnl=path)
+        assert not (tmp_path / "out").exists()
+
+    def test_a_missing_kpi_column_is_named(self, tmp_path):
+        from src.pipeline import PipelineError
+        path = tmp_path / "kpis.csv"
+        _write_csv(path, ["metric", "value"], [["Headcount", "214"]])
+        with pytest.raises(PipelineError, match="The KPI file is missing the columns actual, target"):
+            _own_run(tmp_path, kpis=path)
+        assert not (tmp_path / "out").exists()
+
+    def test_an_empty_file_is_named(self, tmp_path):
+        from src.pipeline import PipelineError
+        path = tmp_path / "pnl.csv"
+        path.write_text("", encoding="utf-8")
+        with pytest.raises(PipelineError, match="The P&L file is empty"):
+            _own_run(tmp_path, pnl=path)
+
+    def test_header_case_and_spaces_do_not_matter(self, tmp_path):
+        from config import PNL_PATH
+        rows = _sample_rows(PNL_PATH)
+        path = tmp_path / "pnl.csv"
+        _write_csv(path, [" Line_Item", "CATEGORY ", "Actuals", "Budget", "Prior_Year"], rows[1:])
+        assert len(_own_run(tmp_path, pnl=path).pack.pnl_lines) == len(rows) - 1
+
+    def test_no_loadable_lines(self, tmp_path):
+        from src.pipeline import PipelineError
+        path = tmp_path / "pnl.csv"
+        _write_csv(path, PNL_HEADER, [["Retail", "revenue", "lots", "1", "1"]])
+        with pytest.raises(PipelineError, match="no lines that could be loaded"):
+            _own_run(tmp_path, pnl=path)
+        assert not (tmp_path / "out").exists()
+
+    # -- data notes and long names -----------------------------------------------
+
+    def test_data_notes_hold_every_load_and_validation_note(self, tmp_path):
+        from config import PNL_PATH
+        rows = _sample_rows(PNL_PATH)
+        long_name = "Ingredients, packaging and inbound freight for the Leeds and York sites"
+        rows[4][0] = long_name
+        rows[5][0] = ""
+        path = tmp_path / "pnl.csv"
+        _write_csv(path, rows[0], rows[1:] + [["Rent", "opex", "n/a", "1", "1"]])
+        result = _own_run(tmp_path, pnl=path)
+        assert result.data_notes == [
+            "P&L row 13 (Rent): the actual 'n/a' could not be read, so the row was left out.",
+            "P&L: one COGS line has no name; it is kept as 'Unnamed COGS line'.",
+            "P&L: the line name 'Ingredients, packaging and inbound...' is longer than 60 "
+            "characters; it is kept and wraps in the tables.",
+            "These totals exclude 1 row of the source file that could not be read: "
+            "Rent (row 13).",
+        ]
+        assert result.narrate_notices == []
+        assert all(n in result.pack.warnings for n in result.data_notes[:-1])
+
+    def test_a_long_name_warns_and_wraps_in_its_column(self, tmp_path):
+        from reportlab.platypus import Paragraph
+        from src.step2_validate import names_not_too_long
+        from src.step7_render import _pnl_table
+        from config import PNL_PATH
+        long_name = "Ingredients, packaging and inbound freight for the Leeds and York sites"
+        assert len(long_name) > 60
+        rows = _sample_rows(PNL_PATH)
+        rows[4][0] = long_name
+        path = tmp_path / "pnl.csv"
+        _write_csv(path, rows[0], rows[1:])
+        result = _own_run(tmp_path, pnl=path)
+        pack = result.pack
+        assert names_not_too_long(pack.pnl_lines, []) == [
+            "P&L: the line name 'Ingredients, packaging and inbound...' is longer than 60 "
+            "characters; it is kept and wraps in the tables."]
+        table = _pnl_table(pack)
+        labels = [row[0] for row in table._cellvalues[2:]]
+        wrapped = [c for c in labels if isinstance(c, Paragraph)]
+        assert len(wrapped) == 1 and wrapped[0].text == long_name.replace("&", "&amp;")
+        assert all(isinstance(c, str) for c in labels if c is not wrapped[0])
+        sample = _pnl_table(_own_run(tmp_path / "s").pack)
+        assert table._colWidths == sample._colWidths                 # no wider
+        text = _flat(_pdf_pages(result.pdf_path.read_bytes()))
+        for word in long_name.split():
+            assert word in text
+
+    def test_a_long_kpi_name_warns(self):
+        from src.step2_validate import names_not_too_long
+        kpi = Kpi(metric="Orders delivered in full and on time to supermarket customers (%)",
+                  actual=Decimal("96"), target=Decimal("98"), prior_year=Decimal("95"))
+        assert names_not_too_long([], [kpi])[0].startswith(
+            "KPIs: the KPI name 'Orders delivered in full and on time to...' is longer")
+
+    # -- the commentary source line ---------------------------------------------
+
+    def test_commentary_source(self, tmp_path):
+        from src.pipeline import SectionType as ST, commentary_source
+        assert commentary_source(_own_run(tmp_path / "t").pack) == "Template"
+        client = FakeClient(json.dumps(MODEL_SECTIONS))
+        pack = _own_run(tmp_path / "m", client=client).pack
+        assert {s.drafted_by for s in pack.sections} == {"model"}
+        assert commentary_source(pack) == (
+            "claude-sonnet-4-6, 1,840 input and 412 output tokens")
+        partial = FakeClient(json.dumps({k: v for k, v in MODEL_SECTIONS.items() if k != "cash"}))
+        result = _own_run(tmp_path / "p", client=partial)
+        assert commentary_source(result.pack).endswith("; the template for Cash balance")
+        assert result.narrate_notices == [
+            "Commentary: the model's reply had no Cash balance section, so the template "
+            "drafted it."]
+        assert result.pack.section(ST.CASH).drafted_by == "template"
+
+    def test_a_failed_model_call_falls_back_with_a_notice(self, tmp_path):
+        from src.pipeline import commentary_source
+        result = _own_run(tmp_path, client=FakeClient(error=RuntimeError("down")))
+        assert commentary_source(result.pack) == "Template"
+        assert result.narrate_notices == [
+            "Commentary: the model call failed (RuntimeError), so the template drafted "
+            "every section."]
+        assert result.narrate_notices[0] not in result.data_notes
+
+    def test_the_model_sees_the_runs_entity_and_period(self, tmp_path):
+        client = FakeClient(json.dumps(MODEL_SECTIONS))
+        _own_run(tmp_path, client=client, entity="Test Co", period="September 2026")
+        prompt = client.calls[0]["messages"][0]["content"]
+        assert "Pack: Test Co, September 2026." in prompt and "Harmwell" not in prompt
+
+
+# ── W4 PART A: NOTES IN ONE PLAIN FORM, NAMED EXCLUSIONS, BILLIONS, CASH GUARDS ──
+
+MESSY_ROWS = [
+    ["Retail", "revenue", "1643820", "1700000", "1521440"],
+    ["Food service", "revenue", "612540", "640000", "548210"],
+    ["Export", "revenue", "221190", "250000", "279630"],
+    ["Ingredients, packaging and inbound freight for the Leeds and York sites", "cogs",
+     "942310", "905000", "812470"],
+    ["Packaging", "cogs", "318970", "322000", "296180"],
+    ["", "cogs", "349880", "350000", "331920"],
+    ["Marketing", "opex", "297640", "260000", "241880"],
+    ["Personnel", "opex", "356210", "352000", "329740"],
+    ["Logistics", "opex", "141560", "138000", "127310"],
+    ["Facilities", "opex", "64720", "66000", "61050"],
+    ["IT and admin", "opex", "52380", "50000", "47920"],
+    ["Rent", "opex", "n/a", "41000", "40000"],
+]
+
+
+@pytest.fixture(scope="module")
+def northbridge(tmp_path_factory):
+    """The messy P&L with no KPI file, run as Northbridge Ltd, August 2026."""
+    tmp = tmp_path_factory.mktemp("northbridge")
+    path = tmp / "messy_pnl.csv"
+    _write_csv(path, PNL_HEADER, MESSY_ROWS)
+    return _own_run(tmp, pnl=path, kpis=None, entity="Northbridge Ltd",
+                    period="August 2026", cash_scale=1)
+
+
+class TestPlainNotes:
+    """A1: one plain form, from readable names, everywhere a note is read."""
+
+    def test_the_northbridge_data_notes(self, northbridge):
+        assert northbridge.data_notes == [
+            "P&L row 13 (Rent): the actual 'n/a' could not be read, so the row was left out.",
+            "No KPI file was supplied, so the KPIs show only the gross margin from the P&L "
+            "and there is no cash balance.",
+            "P&L: one COGS line has no name; it is kept as 'Unnamed COGS line'.",
+            "P&L: the line name 'Ingredients, packaging and inbound...' is longer than 60 "
+            "characters; it is kept and wraps in the tables.",
+            "These totals exclude 1 row of the source file that could not be read: "
+            "Rent (row 13).",
+        ]
+
+    def test_the_same_sentences_in_the_pdf_review_notes(self, northbridge):
+        text = _flat(_pdf_pages(northbridge.pdf_path.read_bytes()))
+        review = text[text.index("Review notes"):]
+        for note in northbridge.data_notes:
+            assert " ".join(note.split()) in review, note
+
+    def test_no_engine_wording_reaches_a_reader(self, northbridge):
+        for note in northbridge.pack.warnings:
+            assert not note.startswith(("pnl", "kpi", "narrate")), note
+            assert "line_item" not in note and "skipped" not in note
+            assert note.endswith("."), note
+
+    def test_each_note_carries_its_fields_for_the_audit(self, northbridge):
+        from src.notes import Note
+        rent = northbridge.pack.warnings[0]
+        assert isinstance(rent, Note) and rent == northbridge.data_notes[0]
+        assert (rent.kind, rent.file, rent.row, rent.name) == (
+            "unreadable_amount", "pnl", 13, "Rent")
+        line = _audit_lines(northbridge.audit_path.parent)[0]
+        assert line["notes"][0] == {
+            "kind": "unreadable_amount", "file": "pnl", "row": 13, "name": "Rent",
+            "message": rent}
+        assert [n["kind"] for n in line["notes"]] == [
+            "unreadable_amount", "no_kpi_file", "unnamed_line", "long_name"]
+        assert line["warnings"] == [n["message"] for n in line["notes"]]
+
+    def test_a_note_survives_a_copy(self):
+        from src.notes import unreadable_amount
+        note = unreadable_amount(13, "Rent", "actuals", "n/a")
+        copied = copy.deepcopy(note)
+        assert copied == note and copied.row == 13 and copied.kind == "unreadable_amount"
+        assert json.loads(json.dumps([note])) == [str(note)]
+
+    def test_the_cli_prints_the_same_notes(self, tmp_path):
+        path = tmp_path / "messy_pnl.csv"
+        _write_csv(path, PNL_HEADER, MESSY_ROWS)
+        code, out = _main(["--pnl", str(path), "--draft-only", "--output", str(tmp_path / "o")])
+        assert code == 0
+        flat = " ".join(out.split())
+        assert ("Data notes: 1. P&L row 13 (Rent): the actual 'n/a' could not be read, so "
+                "the row was left out.") in flat
+        assert "These totals exclude 1 row of the source file that could not be read: " \
+               "Rent (row 13)." in flat
+        _, sample_out = _main(["--draft-only", "--output", str(tmp_path / "s")])
+        assert "Data notes: none" in sample_out
+
+    def test_row_handling_quotes_the_engines_own_notes(self, tmp_path):
+        from src.pipeline import row_handling
+        rows = row_handling()
+        assert len(rows) == 10 and all(len(r) == 3 for r in rows)
+        written = {r[2] for r in rows}
+        path = tmp_path / "messy_pnl.csv"
+        _write_csv(path, PNL_HEADER, MESSY_ROWS)
+        engine = set(_own_run(tmp_path, pnl=path).data_notes)
+        assert ("P&L row 13 (Rent): the actual 'n/a' could not be read, so the row was "
+                "left out.") in written & engine
+        assert "P&L: one COGS line has no name; it is kept as 'Unnamed COGS line'." in \
+            written & engine
+
+    @pytest.mark.parametrize("labels, expected", [
+        (["Unnamed COGS line"], "P&L: one COGS line has no name; it is kept as "
+                                "'Unnamed COGS line'."),
+        (["Unnamed opex line 1", "Unnamed opex line 2", "Unnamed opex line 3"],
+         "P&L: three opex lines have no name; they are kept as 'Unnamed opex line 1', "
+         "'Unnamed opex line 2' and 'Unnamed opex line 3'.")])
+    def test_unnamed_lines_are_one_note_per_category(self, labels, expected):
+        from src.notes import unnamed_lines
+        word = "COGS" if "COGS" in labels[0] else "opex"
+        assert unnamed_lines(word, labels) == expected
+
+
+class TestNamedExclusions:
+    """A2: the rows the totals leave out are named, up to three, then counted."""
+
+    @pytest.mark.parametrize("rows, expected", [
+        ([(13, "Rent")], "These totals exclude 1 row of the source file that could not be "
+                         "read: Rent (row 13)."),
+        ([(3, "Export"), (4, "Corporation tax")],
+         "These totals exclude 2 rows of the source file that could not be read: "
+         "Export (row 3) and Corporation tax (row 4)."),
+        ([(3, "A"), (4, "B"), (5, "C")],
+         "These totals exclude 3 rows of the source file that could not be read: "
+         "A (row 3), B (row 4) and C (row 5)."),
+        ([(3, "A"), (4, "B"), (5, "C"), (6, "D"), (9, "E")],
+         "These totals exclude 5 rows of the source file that could not be read: "
+         "A (row 3), B (row 4), C (row 5) and 2 more."),
+        ([(9, "")], "These totals exclude 1 row of the source file that could not be "
+                    "read: row 9 (no name)."),
+    ])
+    def test_the_sentence(self, rows, expected):
+        from src.notes import SkippedRow, excluded_rows
+        assert excluded_rows([SkippedRow(*r) for r in rows]) == expected
+
+    def test_a_nameless_row_with_an_unknown_category(self, tmp_path):
+        path = tmp_path / "pnl.csv"
+        _write_csv(path, PNL_HEADER, [["Retail", "revenue", "1", "1", "1"],
+                                      ["", "tax", "5", "5", "5"]])
+        result = _own_run(tmp_path, pnl=path)
+        assert result.data_notes[0] == (
+            "P&L row 3 (no name): the category 'tax' is not revenue, cogs or opex, so the "
+            "row was left out.")
+        assert result.data_notes[-1].endswith("could not be read: row 3 (no name).")
+
+    def test_the_pdf_box_and_the_data_notes_say_the_same(self, tmp_path):
+        path = tmp_path / "pnl.csv"
+        _write_csv(path, PNL_HEADER, MESSY_ROWS)
+        result = _own_run(tmp_path, pnl=path)
+        box = result.data_notes[-1]
+        text = _flat(_pdf_pages(result.pdf_path.read_bytes()))
+        assert text.index(box) < text.index("Fav/(Adv) vs budget")
+        assert text.count(box) == 2                    # the box, and the review notes
+
+
+@pytest.fixture(scope="module")
+def large():
+    """A company with £1.23bn revenue, narrated by the template."""
+    from src.step5_narrate import narrate
+    lines = [_pl("Retail", Category.REVENUE, 1234560000, 1300000000),
+             _pl("Ingredients", Category.COGS, 700000000, 690000000),
+             _pl("Marketing", Category.OPEX, 90000000, 80000000)]
+    return narrate(_assemble_lines(lines))
+
+
+class TestBillions:
+    """A3: £bn to 2dp at or above £1bn, and the numeric check reads it."""
+
+    def test_a_large_companys_revenue_reads_in_billions(self, large):
+        summary = large.section(SectionType.EXEC_SUMMARY).narrative
+        assert summary.startswith("Revenue was £1.23bn, £65.44m (5.0%) below budget")
+        assert large.numeric_warnings == []
+
+    @pytest.mark.parametrize("text, flagged", [
+        ("Revenue was £1.23bn.", []), ("Revenue was £1.23 billion.", []),
+        ("Revenue was £1.24bn.", ["£1.24bn"]), ("Revenue was £1.2bn.", []),
+        ("Revenue was £1,234.56m.", []), ("Revenue was £2bn.", ["£2bn"])])
+    def test_the_numeric_check_reads_bn(self, large, text, flagged):
+        from src.step5_narrate import unmatched_tokens
+        assert unmatched_tokens(text, large) == flagged
+
+
+class TestCashUnitGuards:
+    """A4: two soft notes on the cash unit, in the data notes and the sign-off summary."""
+
+    def _kpis(self, tmp_path, metric, actual="1176000"):
+        path = tmp_path / "kpis.csv"
+        _write_csv(path, KPI_HEADER, [["Headcount", "214", "205", "198"],
+                                      [metric, actual, "1350000", "1288000"]])
+        return path
+
+    def _kinds(self, result):
+        return [n.kind for n in result.pack.warnings if n.kind.startswith("cash_")]
+
+    def test_the_sample_as_shipped_raises_neither(self, tmp_path):
+        result = _own_run(tmp_path)
+        assert self._kinds(result) == [] and result.data_notes == []
+
+    def test_the_sample_with_pounds_selected_raises_the_name_hint(self, tmp_path):
+        from src.pipeline import signoff_summary
+        result = _own_run(tmp_path, cash_scale=1)
+        hint = ("Cash: the KPI name 'Cash balance (GBP 000s)' suggests thousands, but cash "
+                "was read as pounds. Check the unit chosen for cash.")
+        assert result.data_notes == [hint]
+        assert self._kinds(result) == ["cash_unit_hint"]
+        assert hint in signoff_summary(result.pack, {})
+        assert result.pack.status is PackStatus.DRAFT          # a note, never a block
+
+    def test_a_pounds_file_read_as_thousands_raises_the_size_check(self, tmp_path):
+        result = _own_run(tmp_path, kpis=self._kpis(tmp_path, "Cash balance"),
+                          cash_scale=1000)
+        assert result.data_notes == [
+            "Cash: the balance of £1.18bn is more than 100 times this month's revenue of "
+            "£2.48m. Check the unit chosen for cash."]
+        assert self._kinds(result) == ["cash_vs_revenue"]
+
+    def test_a_pounds_file_named_in_pounds_read_as_thousands_raises_both(self, tmp_path):
+        result = _own_run(tmp_path, kpis=self._kpis(tmp_path, "Cash balance (GBP)"),
+                          cash_scale=1000)
+        assert self._kinds(result) == ["cash_unit_hint", "cash_vs_revenue"]
+        assert "suggests pounds, but cash was read as thousands" in result.data_notes[0]
+
+    def test_the_same_file_read_correctly_raises_neither(self, tmp_path):
+        result = _own_run(tmp_path, kpis=self._kpis(tmp_path, "Cash balance (GBP)"),
+                          cash_scale=1)
+        assert self._kinds(result) == []
+
+    @pytest.mark.parametrize("metric, hint", [
+        ("Cash balance (GBP 000s)", 1000), ("Cash balance (£000)", 1000),
+        ("Cash balance (£k)", 1000), ("Cash balance (thousands)", 1000),
+        ("Cash balance (GBP)", 1), ("Cash balance (£)", 1), ("Cash balance (pounds)", 1),
+        ("Cash balance", None), ("Cash balance (GBP m)", None), ("Cash balance (local)", None)])
+    def test_unit_hint(self, metric, hint):
+        from src.step4_assemble import unit_hint
+        assert unit_hint(metric) == hint
+
+    def test_no_revenue_means_no_size_check(self):
+        from src.step4_assemble import cash_unit_notes
+        from src.state import Subtotals
+        cash = Kpi(metric="Cash balance", actual=Decimal("1176000"), target=Decimal("1"))
+        s = Subtotals(revenue_actual=Decimal("0"))
+        assert cash_unit_notes([cash], s, 1000) == []

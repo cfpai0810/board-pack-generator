@@ -152,7 +152,26 @@ DRIVERS_NOTE = ("Computed from the P&L: each line's budget variance as its effec
 
 KPI_NOTE = "For gross margin the target is the budget margin."
 
-CASH_NOTE = "Converted to pounds from the KPI file, which states cash in thousands."
+def commentary_source(pack: Pack) -> str:
+    """
+    How the commentary was drafted, in one line: "Template", or the model id
+    with its token counts (and any section the template filled in for it).
+    """
+    template = [s.title for s in pack.sections if s.drafted_by == "template"]
+    if len(template) == len(pack.sections):
+        return "Template"
+    line = (f"{pack.narrative_model}, {pack.narrative_input_tokens:,} input and "
+            f"{pack.narrative_output_tokens:,} output tokens")
+    return line + (f"; the template for {', '.join(template)}" if template else "")
+
+
+def cash_note(pack: Pack) -> str:
+    """How the cash figures relate to the KPI file, from the run's own cash scale."""
+    if pack.cash_scale == 1:
+        return "Stated in pounds, as in the KPI file."
+    if pack.cash_scale == 1000:
+        return "Converted to pounds from the KPI file, which states cash in thousands."
+    return f"Converted to pounds from the KPI file, at {pack.cash_scale:,} pounds per unit."
 
 
 @dataclass(frozen=True)

@@ -105,12 +105,17 @@ def inject_css() -> str:
       table.bp-table thead th.num {{ text-align: right; }}
       table.bp-table thead tr:last-child th {{ border-bottom: 1px solid {RULE}; }}
       table.bp-table td.num {{ text-align: right; }}
+      table.bp-table td.label {{ white-space: normal; min-width: 10em; max-width: 22em; }}
       table.bp-table th.group {{ text-align: center; }}
       table.bp-table tr.line td:first-child {{ padding-left: 20px; }}
       table.bp-table tr.subtotal td {{ font-weight: 700; border-top: 1px solid {RULE}; }}
       table.bp-table tr.margin td {{ border-top: 1px solid {RULE}; border-bottom: 1px solid {RULE}; }}
       table.bp-table tr.material td {{ background: {MATERIAL}; }}
-      .bp-note {{ font-size: 0.76rem; color: {MUTED}; margin: 2px 0; }}
+      .bp-note, [data-testid="stMarkdownContainer"] p.bp-note {{
+        font-size: 0.76rem; color: {MUTED}; margin: 2px 0;
+      }}
+      ol.bp-datanotes {{ margin: 0; padding-left: 1.4em; font-size: 0.85rem; color: {INK}; }}
+      ol.bp-datanotes li {{ margin: 2px 0; }}
       ul.bp-flags {{ margin: 0 0 14px; padding-left: 1.1em; font-size: 0.82rem; color: {INK}; }}
       ul.bp-flags li {{ margin: 2px 0; }}
 
