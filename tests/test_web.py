@@ -732,7 +732,7 @@ class TestUploadHandling:
         pnl, kpis = stage(inputs, tmp_path)
         assert (pnl, kpis) == (tmp_path / "inputs" / "pnl.csv", tmp_path / "inputs" / "kpis.csv")
         assert pnl.read_bytes() == SAMPLE_PNL and kpis.read_bytes() == SAMPLE_KPIS
-        assert [p for p in tmp_path.rglob("*") if p.is_file()] == sorted([kpis, pnl])
+        assert sorted(p for p in tmp_path.rglob("*") if p.is_file()) == sorted([kpis, pnl])
 
     def test_the_sample_is_never_copied(self, tmp_path):
         from config import KPIS_PATH, PNL_PATH
