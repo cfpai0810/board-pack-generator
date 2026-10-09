@@ -1,0 +1,12 @@
+line_item,category,actuals,budget,prior_year
+Retail,revenue,1643820,1700000,1521440
+Food service,revenue,612540,640000,548210
+Export,revenue,221190,250000,279630
+Ingredients,cogs,942310,905000,812470
+Packaging,cogs,318970,322000,296180
+Production labour,cogs,349880,350000,331920
+Marketing,opex,297640,260000,241880
+Personnel,opex,356210,352000,329740
+Logistics,opex,141560,138000,127310
+Facilities,opex,64720,66000,61050
+IT and admin,opex,52380,50000,47920
