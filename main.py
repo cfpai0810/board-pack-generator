@@ -36,7 +36,7 @@ from typing import Optional, TextIO
 
 from config import KPIS_PATH, NARRATIVE_MODEL, OUTPUT_DIR, PNL_PATH, ROOT
 from src.pipeline import (
-    SIGN_WORD, PipelineError, PipelineResult, is_sign_word, run_pipeline,
+    CASH_UNITS, SIGN_WORD, PipelineError, PipelineResult, is_sign_word, run_pipeline,
 )
 from src.state import PackStatus
 
@@ -175,6 +175,12 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                         help="absolute materiality threshold (default: config)")
     parser.add_argument("--materiality-pct", type=_amount, default=None, metavar="PERCENT",
                         help="percentage materiality threshold (default: config)")
+    parser.add_argument("--entity", default=None,
+                        help="the entity the pack is for (required with your own --pnl)")
+    parser.add_argument("--period", default=None,
+                        help="the period, such as 'September 2026' (required with your own --pnl)")
+    parser.add_argument("--cash-unit", choices=sorted(CASH_UNITS), default=None,
+                        help="the unit the KPI file states cash in (default: thousands)")
     parser.add_argument("--use-model", action="store_true",
                         help="draft the commentary with the model; reads ANTHROPIC_API_KEY "
                              "from the environment or .env, never from an argument")
@@ -215,6 +221,12 @@ def main(argv: Optional[list[str]] = None, *, stdin: Optional[TextIO] = None,
     reviewer = TerminalReviewer(stdin, stdout)
     say = reviewer._say
 
+    own_file = Path(args.pnl).is_file() and Path(args.pnl).resolve() != PNL_PATH.resolve()
+    if own_file and not (args.entity and args.period):
+        say("Stopped: with your own P&L file, give --entity and --period, so the pack is "
+            "not headed with the sample's name.")
+        return 2
+
     client, path_note = build_client(args.use_model)
     say(path_note)
     name = "" if args.draft_only else reviewer.ask_name()
@@ -226,6 +238,8 @@ def main(argv: Optional[list[str]] = None, *, stdin: Optional[TextIO] = None,
             confirm=None if args.draft_only else reviewer.confirm,
             reviewer=name, client=client,
             materiality_abs=args.materiality_abs, materiality_pct=args.materiality_pct,
+            entity=args.entity, period=args.period,
+            cash_scale=None if args.cash_unit is None else CASH_UNITS[args.cash_unit],
             draft_only=args.draft_only,
         )
     except PipelineError as e:

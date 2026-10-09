@@ -48,6 +48,14 @@ def _app(script: str) -> AppTest:
     return AppTest.from_file(str(APP / script), default_timeout=120)
 
 
+def _page(script: str) -> AppTest:
+    """A page as a visitor reaches it: through Home's navigation, so its page links resolve."""
+    at = _app("Home.py").run()
+    if script != "Home.py":
+        at.switch_page(script).run()
+    return at
+
+
 def _drafted() -> AppTest:
     """The Board pack page after "Run the sample as a draft"."""
     at = _app(BOARD).run()
@@ -56,8 +64,25 @@ def _drafted() -> AppTest:
     return at
 
 
+def _beyond_example(at, kind: str) -> list:
+    """
+    The page's elements of one kind, leaving out the worked example tab: the
+    Board pack page's run tests read the page around the run, and the worked
+    example (a signed pack, with its own flag and downloads) is tested on its own.
+    """
+    elements = list(at.get(kind))
+    if not at.tabs:
+        return elements
+    skip = {id(e) for e in at.tabs[0].get(kind)}
+    return [e for e in elements if id(e) not in skip]
+
+
 def _markdown(at) -> str:
-    return " ".join(m.value for m in at.markdown)
+    return " ".join(m.value for m in _beyond_example(at, "markdown"))
+
+
+def _downloads(at) -> list:
+    return _beyond_example(at, "download_button")
 
 
 def _edit(at, section: str, change) -> None:
@@ -100,7 +125,7 @@ def sample_run():
 class TestPagesLoad:
     @pytest.mark.parametrize("script", PAGES)
     def test_page_loads_without_error(self, script):
-        at = _app(script).run()
+        at = _page(script)
         assert not at.exception, at.exception
 
     def test_home_states_the_governance_promise(self):
@@ -208,10 +233,10 @@ class TestReviewStage:
     def test_no_draft_download_until_saved_and_then_it_is_timed(self):
         from src.pipeline import when_text
         at = _drafted()
-        assert len(at.get("download_button")) == 0          # the unedited draft is not offered
+        assert len(_downloads(at)) == 0                     # the unedited draft is not offered
         _edit(at, "exec_summary", lambda t: t + REASON)
         at.button(key="bp_save").click().run()
-        (download,) = at.get("download_button")
+        (download,) = _downloads(at)
         saved = at.session_state["bp_saved"]
         assert download.proto.label == f"Download the DRAFT PDF saved {when_text(saved['saved_at'])}"
         assert "fortnight's closure of the Leeds site" in _pdf_text(saved["pdf"])
@@ -219,7 +244,7 @@ class TestReviewStage:
     def test_a_refused_sign_off_does_not_offer_a_draft_download(self):
         at = _drafted()
         _sign(at, word="sign")
-        assert len(at.get("download_button")) == 0
+        assert len(_downloads(at)) == 0
 
     @pytest.mark.parametrize("name, word, warning", [
         ("A. Controller", "sign",
@@ -308,7 +333,8 @@ class TestReviewStage:
 
         at = _drafted()
         _edit(at, "exec_summary", lambda t: t + " The closure cost £20k.")
-        on_screen = re.findall(r"^\d+\. (.*)$", "\n".join(m.value for m in at.markdown),
+        on_screen = re.findall(r"^\d+\. (.*)$",
+                               "\n".join(m.value for m in _beyond_example(at, "markdown")),
                                flags=re.MULTILINE)
         _sign(at)
         assert seen and on_screen == seen[0]
@@ -355,6 +381,19 @@ class TestWebLayerBoundary:
         from streamlit_app.lib.theme import INK
         theme = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))
         assert theme["theme"]["primaryColor"] == INK
+
+    def test_the_key_never_reaches_a_file(self, monkeypatch):
+        # Privacy: the key lives in session state only. After a model run, no
+        # file the session wrote (the PDF, the audit lines) contains it.
+        from streamlit_app.lib import claude_client
+        monkeypatch.setattr(claude_client, "build_client", lambda key: FakeClient())
+        at = _with_key(_app(BOARD).run())
+        at.radio(key="in_commentary").set_value("Model").run()
+        at.button(key="bp_run").click().run()
+        assert at.session_state["bp_pack"].narrative_model == "claude-sonnet-4-6"
+        written = [p for p in _folder(at).rglob("*") if p.is_file()]
+        assert written and not any(FAKE_KEY.encode() in p.read_bytes() for p in written)
+        assert sorted(p.suffix for p in written) == [".jsonl", ".pdf"]
 
     def test_the_summary_box_is_not_status_green(self):
         from streamlit_app.lib.theme import FINAL, inject_css
@@ -416,7 +455,8 @@ def _own(at, pnl=SAMPLE_PNL, kpis=SAMPLE_KPIS, entity="Test Co", period="Septemb
 
 def _text(at) -> str:
     """Everything the page says: markdown, captions, alerts and the edit boxes."""
-    parts = [m.value for m in at.markdown] + [c.value for c in at.caption]
+    parts = [m.value for m in _beyond_example(at, "markdown")]
+    parts += [c.value for c in _beyond_example(at, "caption")]
     parts += [e.value for e in at.error] + [w.value for w in at.warning]
     parts += [t.value for t in at.text_area]
     return " ".join(parts)
@@ -553,7 +593,7 @@ class TestOwnFiles:
         assert "Amounts are treated as pounds sterling." in text
         assert ("Your files are written only to this session's own temporary folder on "
                 "the server, read once to build the pack, then deleted." in text)
-        assert [d.proto.label for d in at.get("download_button")] == [
+        assert [d.proto.label for d in _downloads(at)] == [
             "Sample P&L CSV", "Sample KPI CSV"]
 
     def test_the_header_names_no_sample_entity(self):
@@ -712,3 +752,190 @@ class TestUploadHandling:
     def test_with_the_sample_the_own_file_fields_do_not_count(self):
         from streamlit_app.lib.inputs import RunInputs, Upload
         assert RunInputs(entity="Test Co", pnl=Upload("p.csv", b"x")).effective() == RunInputs()
+
+
+# ── W4: THE CONTENT PAGES AND THE WORKED EXAMPLE ───────────────────────
+
+CONTENT = ["pages/1_How_the_pack_is_built.py", "pages/3_Your_own_data.py",
+           "pages/4_How_its_built.py"]
+PLACEHOLDER = re.compile(r"will (show|explain|describe)|until then|placeholder|coming soon|"
+                         r"\bTODO\b|\bW[1-5]\b|lorem", re.IGNORECASE)
+
+
+def _everything(at) -> str:
+    """All the text a page shows: markdown, captions, code, alerts and link labels."""
+    parts = [m.value for m in at.markdown] + [c.value for c in at.caption]
+    parts += [c.value for c in at.code] + [e.value for e in at.error]
+    parts += [w.value for w in at.warning] + [p.proto.label for p in at.get("page_link")]
+    return " ".join(parts)
+
+
+def _sample_figures() -> set[str]:
+    """
+    Every figure of the sample in every form a page could print it: the table
+    cells, the prose amounts, the percentages and points, the KPI values, the
+    thresholds, the material item count, and the test counts.
+    """
+    from config import KPIS_PATH, PNL_PATH
+    from src.formatting import prose_money, table_number, table_value
+    from src.pipeline import (
+        build_pack, count_words, drivers_rows, material_items, pnl_rows, thresholds,
+    )
+    pack = build_pack(PNL_PATH, KPIS_PATH)
+    figures = set()
+    for row in pnl_rows(pack):
+        figures |= {c for c in row.cells if c not in ("", "n/m")}
+    figures |= {r.impact for r in drivers_rows(pack)}
+    values = [getattr(pack.subtotals, f) for f in vars(pack.subtotals)
+              if getattr(pack.subtotals, f) is not None]
+    for line in pack.pnl_lines:
+        values += [line.actuals, line.budget, line.prior_year, line.var_budget_abs, line.var_py_abs]
+    figures |= {prose_money(v) for v in values if abs(v) >= 1000}
+    figures |= {table_value(v) for v in values}
+    for kpi in pack.kpis:
+        figures |= {table_number(v) for v in (kpi.actual, kpi.target, kpi.prior_year,
+                                              kpi.delta_target, kpi.delta_py) if v is not None}
+    figures |= set(thresholds(pack)) | {t.lstrip("£") for t in thresholds(pack)}
+    figures.add(f"{count_words(len(material_items(pack)))} material")
+    counts = json.loads((ROOT / "generated" / "test_counts.json").read_text(encoding="utf-8"))
+    figures.add(str(counts["total"]))
+    figures |= {str(a["tests"]) for a in counts["by_area"]}
+    cleaned = {f.strip("()+-") for f in figures}
+    return {f for f in cleaned if sum(ch.isdigit() for ch in f) >= 2 or " material" in f}
+
+
+def _string_constants(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+
+
+class TestContentPages:
+    def test_no_placeholder_text_on_any_page(self):
+        for script in PAGES:
+            at = _page(script)
+            text = _everything(at)
+            assert not PLACEHOLDER.search(text), (script, PLACEHOLDER.search(text))
+
+    def test_every_internal_link_works(self):
+        names = {Path(p).stem.split("_", 1)[1] for p in PAGES if p.startswith("pages/")}
+        seen = set()
+        for script in PAGES:
+            for link in _page(script).get("page_link"):
+                assert link.proto.page in names, (script, link.proto.page)
+                seen.add(link.proto.page)
+        assert seen == names                              # every page is reachable by a link
+        for script in PAGES[1:]:
+            assert not _page(script).exception
+
+    def test_no_sample_figure_is_typed_into_a_page(self):
+        figures = _sample_figures()
+        assert {"50,000", "£50,000", "10.0%", "193,120", "£2.48m", "six material"} <= figures
+        sources = [APP / "Home.py", *(APP / "pages").glob("*.py"), *(APP / "lib").glob("*.py")]
+        for path in sources:
+            for text in _string_constants(path):
+                for figure in figures:
+                    found = re.search(rf"(?<![\w.,]){re.escape(figure)}(?![\w.,])", text)
+                    assert not found, (path.name, figure, text[:80])
+
+    def test_the_method_page_quotes_the_engine(self):
+        from config import KPIS_PATH, PNL_PATH
+        from src.pipeline import (
+            build_pack, drivers_rows, fav_adv_examples, headline, material_items, thresholds,
+        )
+        pack = build_pack(PNL_PATH, KPIS_PATH)
+        text = _everything(_page(CONTENT[0]))
+        top = headline(pack)
+        assert f"EBIT is {top['ebit']} against {top['ebit_budget']}" in text
+        abs_text, pct_text = thresholds(pack)
+        assert f"{abs_text} or more, or {pct_text} of budget" in text
+        assert "the rule finds six material items" in text
+        for item in material_items(pack):
+            assert f"<td>{html_escape(item.name)}</td>" in text and item.variance in text
+        for row in drivers_rows(pack):
+            assert row.impact in text
+        for example in fav_adv_examples(pack):
+            assert example.reading in text and example.shown in text
+        assert ("with the drivers grouped as lines that lowered profit. In two of three runs it "
+                "still described the ingredients overspend as an offset, and the very first live "
+                "run had made the same error.") in text
+        assert f"In the sample, the three revenue lines sum to revenue of {top['revenue']}" in text
+
+    def test_the_data_page_uses_the_engines_notes_and_limits(self):
+        from src.pipeline import CATEGORIES, KPI_COLUMNS, PNL_COLUMNS, row_handling
+        from streamlit_app.lib.inputs import MAX_MB, MAX_PNL_LINES
+        text = _everything(_page(CONTENT[1]))
+        for _, _, note in row_handling():
+            assert html_escape(note) in text, note
+        for column in PNL_COLUMNS + KPI_COLUMNS:
+            assert f"<td>{column}</td>" in text
+        assert "One of revenue, cogs or opex." in text and len(CATEGORIES) == 3
+        assert f"Each file up to {MAX_MB} MB, and the P&L up to {MAX_PNL_LINES} lines." in text
+        assert "python main.py --draft-only" in text
+
+    def test_the_build_page_reads_its_figures_from_files_and_the_engine(self):
+        from config import KPIS_PATH, PNL_PATH
+        from src.pipeline import build_pack, model_prompt
+        at = _page(CONTENT[2])
+        text = _everything(at)
+        counts = json.loads((ROOT / "generated" / "test_counts.json").read_text(encoding="utf-8"))
+        assert f"{counts['total']:,} tests pin the behaviour" in text
+        for area in counts["by_area"]:
+            assert f"<td class=\"label\">{html_escape(area['area'])}</td>" in text
+        audit = (ROOT / "generated" / "worked_example" / "audit.jsonl").read_text(encoding="utf-8")
+        assert audit.strip() in [c.value.strip() for c in at.code]
+        assert "They match." in text
+        _, user = model_prompt(build_pack(PNL_PATH, KPIS_PATH))
+        assert user in [c.value for c in at.code]
+        assert "£3m raises no flag against a revenue budget of £2.59m" in text
+
+    def test_the_pipeline_reads_on_a_phone(self):
+        # The steps are a single column of blocks, and every table sits in a
+        # wrapper that scrolls sideways, so nothing widens the page.
+        from streamlit_app.lib.theme import inject_css
+        css = inject_css()
+        assert "ol.bp-flow li" in css and ".bp-table-wrap { overflow-x: auto;" in css
+        for script in CONTENT:
+            for value in [m.value for m in _page(script).markdown]:
+                if "<table" in value:
+                    assert value.startswith('<div class="bp-table-wrap">'), value[:60]
+
+
+class TestWorkedExampleTab:
+    def test_it_loads_without_building_anything(self, monkeypatch):
+        import src.pipeline as pipeline
+        from streamlit_app.lib import content, inputs
+
+        def refuse(*args, **kwargs):
+            raise AssertionError("the worked example tab must not build a pack")
+        for module, name in ((pipeline, "run_pipeline"), (pipeline, "build_pack"),
+                             (inputs, "run_pipeline"), (content, "build_pack")):
+            monkeypatch.setattr(module, name, refuse)
+        at = _app(BOARD).run()
+        assert not at.exception, at.exception
+        assert "bp_pack" not in at.session_state
+
+    def test_the_walkthrough_and_the_signed_pages(self):
+        at = _app(BOARD).run()
+        tab = " ".join(m.value for m in at.tabs[0].markdown)
+        assert "1. The template drafted the commentary for Harmwell Foods Ltd, June 2026" in tab
+        assert "2. The reviewer, A. Controller, added a reason to the executive summary" in tab
+        assert "3. Their figure, '£20k', matches no figure in the pack" in tab
+        captions = " ".join(c.value for c in at.tabs[0].caption)
+        assert ("They were drawn from the file whose SHA-256 its rendered audit line records, "
+                "checked as this page loaded.") in captions
+        manifest = json.loads((ROOT / "generated" / "worked_example" / "pages.json")
+                              .read_text(encoding="utf-8"))
+        images = at.tabs[0].get("image")
+        assert len(images) == len(manifest["pages"]) == 2
+        shown = [img.proto.imgs[0].caption for img in images]
+        assert shown == ["Page 1 of 2", "Page 2 of 2"]
+
+    def test_the_downloads_are_the_committed_files(self):
+        at = _app(BOARD).run()
+        worked = ROOT / "generated" / "worked_example"
+        labels = {d.proto.label for d in at.tabs[0].get("download_button")}
+        assert labels == {"Download the FINAL PDF", "Download its audit lines (.jsonl)"}
+        from streamlit_app.lib.content import worked_example
+        example = worked_example()
+        assert example["pdf"] == next(worked.glob("*.pdf")).read_bytes()
+        assert example["audit_text"] == (worked / "audit.jsonl").read_text(encoding="utf-8")

@@ -35,7 +35,7 @@ def inject_css() -> str:
       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap');
 
       html, body, [class*="css"], .stMarkdown, .stText, p, span, div, label,
-      input, button, table, td, th {{
+      input, button, table, td, th, ul, ol, li, strong, em, caption {{
         font-family: {SANS};
         font-feature-settings: "tnum" 1;
       }}
@@ -115,6 +115,36 @@ def inject_css() -> str:
         font-size: 0.76rem; color: {MUTED}; margin: 2px 0;
       }}
       ol.bp-datanotes {{ margin: 0; padding-left: 1.4em; font-size: 0.85rem; color: {INK}; }}
+      [data-testid="stMarkdownContainer"] code {{
+        color: {INK}; background: #EEF0F2; white-space: nowrap;
+      }}
+      code, code *, pre, pre * {{
+        font-family: ui-monospace, "Source Code Pro", Consolas, monospace !important;
+      }}
+      table.bp-plain thead th {{
+        border-bottom: 1px solid {RULE}; vertical-align: bottom; white-space: normal;
+      }}
+      /* Page links wrap rather than clip on a phone */
+      [data-testid="stPageLink-NavLink"], [data-testid="stPageLink-NavLink"] * {{
+        white-space: normal !important; height: auto !important;
+      }}
+      table.bp-plain td {{ vertical-align: top; border-bottom: 1px solid {SOFT_RULE}; }}
+      table.bp-plain td.label, table.bp-plain th.label {{ white-space: normal; min-width: 9em; }}
+      table.bp-plain caption {{ caption-side: bottom; text-align: left; font-size: 0.76rem;
+                               color: {MUTED}; padding-top: 4px; }}
+
+      /* The pipeline, one step under another, so it reads the same on a phone */
+      ol.bp-flow {{ list-style: none; margin: 6px 0 14px; padding: 0; }}
+      ol.bp-flow li {{
+        position: relative; margin: 0 0 18px; padding: 8px 12px;
+        border: 1px solid {RULE}; border-radius: 4px; background: #FAFAF8;
+      }}
+      ol.bp-flow li:not(:last-child)::after {{
+        content: ""; position: absolute; left: 22px; bottom: -19px;
+        height: 18px; border-left: 2px solid {RULE};
+      }}
+      ol.bp-flow .bp-step {{ display: block; font-weight: 600; color: {INK}; }}
+      ol.bp-flow .bp-owns {{ display: block; font-size: 0.85rem; color: {MUTED}; }}
       ol.bp-datanotes li {{ margin: 2px 0; }}
       ul.bp-flags {{ margin: 0 0 14px; padding-left: 1.1em; font-size: 0.82rem; color: {INK}; }}
       ul.bp-flags li {{ margin: 2px 0; }}

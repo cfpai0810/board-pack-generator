@@ -396,6 +396,7 @@ def review(
     reviewer: str,
     output_dir: Path,
     sign: bool = True,
+    now: Optional[str] = None,
 ) -> Pack:
     """
     Run the review: ask about each section, recheck edits, summarise what
@@ -405,9 +406,11 @@ def review(
     confirm is not asked, a warning is added and the pack stays DRAFT.
     sign=False records the review without attempting sign-off (a screen's
     "Save as draft"): confirm is never asked and no sign-off warning is
-    added, because nobody tried to sign.
+    added, because nobody tried to sign. now fixes the run's clock (an ISO
+    UTC time) for the review timestamp and the sign-off, for a reproducible
+    build such as the worked example; a live review leaves it None.
     """
-    run_at = _start_run(pack)
+    run_at = _start_run(pack, now)
     _clear_sign_off_warnings(pack)
     _apply_answers(pack, ask, comparison_set(pack))
 
@@ -421,7 +424,7 @@ def review(
         if confirm(summary):
             pack.status = PackStatus.FINAL
             pack.sign_off_by = name
-            pack.sign_off_at = _utc_now()
+            pack.sign_off_at = now or _utc_now()
             pack.acknowledged = summary
 
     record = audit_record(pack, run_id=pack.run_id, timestamp=run_at, reviewer=name)
@@ -493,7 +496,7 @@ def audit_text(output_dir: Path, run_id: Optional[str] = None) -> str:
     return "".join(line + "\n" for line in lines)
 
 
-def _start_run(pack: Pack) -> str:
+def _start_run(pack: Pack, now: Optional[str] = None) -> str:
     """Refuse a FINAL pack, start a new run, keep the first draft text. Returns the run time."""
     if pack.status is PackStatus.FINAL:
         raise AlreadySignedOff(
@@ -505,7 +508,7 @@ def _start_run(pack: Pack) -> str:
     for section in pack.sections:
         if not section.draft:
             section.draft = section.narrative       # what the model or template wrote
-    return _utc_now()
+    return now or _utc_now()
 
 
 def record_draft(pack: Pack, *, output_dir: Path) -> Pack:

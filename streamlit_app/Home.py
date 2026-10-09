@@ -58,7 +58,7 @@ def _home_page():
 
     st.markdown("#### Pages")
     st.page_link(HOW_BUILT, label="How the pack is built: materiality, Fav/(Adv), drivers and sign-off")
-    st.page_link(BOARD_PACK, label="Board pack: run the sample and download the PDF")
+    st.page_link(BOARD_PACK, label="Board pack: a signed example, and a run on your own files")
     st.page_link(OWN_DATA, label="Your own data: the two CSV formats and how to run locally")
     st.page_link(HOW_ITS_BUILT, label="How it's built: the pipeline, the tests and the audit trail")
 

@@ -2,8 +2,9 @@
 # lib/key_gate.py: the bring-your-own-key gate
 # =============================================================================
 # Renders the API key input in the sidebar, holds the key ONLY in this
-# browser session's state, and builds a per-session client. The key is
-# never written to disk, never logged, never stored server-side.
+# session's state (the server's memory, for this session), and builds a
+# client when one is needed. The key is never written to disk, never
+# logged, and never kept beyond the session.
 #
 # The template is the default and needs no key: a key only makes the model
 # available as an opt-in for drafting the commentary. Honest disclosure: the
@@ -34,11 +35,11 @@ def render_key_gate():
         type="password",
         placeholder="sk-ant-...",
         key="byo_api_key",
-        help="Used only for this session. Never stored, never logged.",
+        help="Held in the server's memory for this session only. Never stored, never logged.",
     )
     st.sidebar.markdown(
-        '<div class="bp-keynote">Your key is held only for this browser session to '
-        'make the model call, then discarded. It is never stored or logged. Only the '
+        '<div class="bp-keynote">Your key is held in the server\'s memory for your '
+        'session only, used to make the call, and never stored or logged. Only the '
         'formatted figures and names in the pack facts are sent to the model, never '
         'your files. To keep your key on your own machine, run the project locally.'
         '</div>',

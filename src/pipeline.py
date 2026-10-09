@@ -41,16 +41,21 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
-from src.formatting import when_text
-from src.notes import row_handling
-from src.state import (
-    DRAFT_TEXT, GLYPH, NUMERIC, REVIEWER_TEXT, SECTION_TITLES, Flag, Pack, PackStatus,
-    SectionType,
+from src.explain import (
+    FavAdvExample, MaterialItem, SoftCheckExample, default_threshold_inputs,
+    fav_adv_examples, headline, material_items, model_prompt, placement_example,
+    soft_check_example, thresholds, walkthrough,
 )
-from src.step1_load import MissingColumns, load
+from src.formatting import when_text
+from src.notes import MAX_NAME_LENGTH, count_words, row_handling
+from src.state import (
+    DRAFT_TEXT, GLYPH, NUMERIC, REVIEWER_TEXT, SECTION_TITLES, Category, Flag, Pack,
+    PackStatus, SectionType,
+)
+from src.step1_load import KPI_COLUMNS, PNL_COLUMNS, MissingColumns, file_sha256, load
 from src.step2_validate import validate
 from src.step3_compute import compute
-from src.step4_assemble import assemble
+from src.step4_assemble import CASH_REVENUE_MULTIPLE, assemble
 from src.step5_narrate import narrate
 from src.step6_review import (
     AUDIT_FILE, NAME_WARNING, SIGN_OFF_WARNINGS, SIGN_WARNING, SIGN_WORD, Ask,
@@ -67,7 +72,13 @@ __all__ = [
     # the run
     "run_pipeline", "PipelineError", "PipelineResult",
     # the inputs of a run
-    "parse_materiality", "CASH_UNITS",
+    "parse_materiality", "CASH_UNITS", "build_pack", "default_threshold_inputs",
+    "PNL_COLUMNS", "KPI_COLUMNS", "OPTIONAL_KPI_COLUMNS", "CATEGORIES", "MAX_NAME_LENGTH",
+    # what the explanation pages quote from a pack
+    "headline", "thresholds", "material_items", "MaterialItem", "placement_example",
+    "fav_adv_examples", "FavAdvExample", "soft_check_example", "SoftCheckExample",
+    "model_prompt", "walkthrough", "file_sha256", "count_words",
+    "CASH_REVENUE_MULTIPLE",
     # the review stage
     "review_and_save", "signoff_summary", "check_text", "audit_text",
     "is_sign_word", "SIGN_WORD", "NAME_WARNING", "SIGN_WARNING",
@@ -88,6 +99,9 @@ class PipelineError(Exception):
 
 CASH_UNITS = {"thousands": 1000, "pounds": 1}
 """What one unit of the cash KPI is worth in pounds, by the unit the KPI file states it in."""
+
+CATEGORIES = tuple(c.value for c in Category)
+OPTIONAL_KPI_COLUMNS = ("prior_year",)
 
 
 @dataclass
@@ -163,6 +177,7 @@ def run_pipeline(
     period: Optional[str] = None,
     cash_scale: Optional[int] = None,
     draft_only: bool = False,
+    now: Optional[str] = None,
 ) -> PipelineResult:
     """
     Load, validate, compute, assemble, narrate, review (or record a draft),
@@ -180,9 +195,55 @@ def run_pipeline(
     A problem the person can fix raises PipelineError before anything is
     written: a missing file, a missing column, a P&L with no loadable
     lines, a blank entity or period, a threshold out of range.
+
+    now fixes the run's clock (an ISO UTC time) for the review, the sign-off
+    and the rendered event: for a reproducible build such as the worked
+    example. A live run leaves it None.
     """
     if not draft_only and (ask is None or confirm is None):
         raise ValueError("A review needs ask and confirm; use draft_only=True to skip review.")
+    pack, data_notes, narrate_notices = _build(
+        pnl_path, kpis_path, client=client, materiality_abs=materiality_abs,
+        materiality_pct=materiality_pct, entity=entity, period=period, cash_scale=cash_scale)
+
+    output_dir = Path(output_dir)
+    if draft_only:
+        record_draft(pack, output_dir=output_dir)
+    else:
+        review(pack, ask=ask, confirm=confirm, reviewer=reviewer, output_dir=output_dir,
+               now=now)
+
+    saved_at = now or _utc_now()
+    pdf_path = save_pack(pack, output_dir, now=now)
+    return PipelineResult(pack=pack, pdf_path=pdf_path, audit_path=output_dir / AUDIT_FILE,
+                          saved_at=saved_at, data_notes=data_notes,
+                          narrate_notices=narrate_notices)
+
+
+def build_pack(
+    pnl_path: Path,
+    kpis_path: Optional[Path],
+    *,
+    client=None,
+    materiality_abs: Optional[Decimal] = None,
+    materiality_pct: Optional[Decimal] = None,
+    entity: Optional[str] = None,
+    period: Optional[str] = None,
+    cash_scale: Optional[int] = None,
+) -> Pack:
+    """
+    The narrated DRAFT pack from the files, with nothing reviewed, rendered
+    or written: for pages that explain the method on the sample. The same
+    load, checks, computation, selection and narrative as run_pipeline.
+    """
+    return _build(pnl_path, kpis_path, client=client, materiality_abs=materiality_abs,
+                  materiality_pct=materiality_pct, entity=entity, period=period,
+                  cash_scale=cash_scale)[0]
+
+
+def _build(pnl_path, kpis_path, *, client, materiality_abs, materiality_pct, entity, period,
+           cash_scale) -> tuple[Pack, list[str], list[str]]:
+    """(the narrated pack, its data notes, its narrate notices). Writes nothing."""
     _check_inputs(materiality_abs, materiality_pct, entity, period, cash_scale)
     for path in (pnl_path, kpis_path):
         if path is not None and not Path(path).is_file():
@@ -221,19 +282,7 @@ def run_pipeline(
         data_notes.append(excluded_rows_note(pack))
     before = len(pack.warnings)
     narrate(pack, client=client)
-    narrate_notices = pack.warnings[before:]
-
-    output_dir = Path(output_dir)
-    if draft_only:
-        record_draft(pack, output_dir=output_dir)
-    else:
-        review(pack, ask=ask, confirm=confirm, reviewer=reviewer, output_dir=output_dir)
-
-    saved_at = _utc_now()
-    pdf_path = save_pack(pack, output_dir)
-    return PipelineResult(pack=pack, pdf_path=pdf_path, audit_path=output_dir / AUDIT_FILE,
-                          saved_at=saved_at, data_notes=data_notes,
-                          narrate_notices=narrate_notices)
+    return pack, data_notes, pack.warnings[before:]
 
 
 # -- The review stage, for a screen with edit boxes ---------------------------------

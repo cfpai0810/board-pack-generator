@@ -24,7 +24,8 @@ from typing import Optional
 
 from config import KPIS_PATH, PNL_PATH
 from src.pipeline import (
-    CASH_UNITS, PipelineError, PipelineResult, parse_materiality, run_pipeline,
+    CASH_UNITS, PipelineError, PipelineResult, default_threshold_inputs, parse_materiality,
+    run_pipeline,
 )
 
 MAX_MB = 1
@@ -34,6 +35,7 @@ MAX_PNL_LINES = 500
 SAMPLE, OWN = "Use the sample", "Use my own files"
 TEMPLATE, MODEL = "Template", "Model"
 CASH_CHOICES = {"thousands": "Thousands (as in the sample)", "pounds": "Pounds"}
+DEFAULT_ABS, DEFAULT_PCT = default_threshold_inputs()
 
 
 class UploadError(PipelineError):
@@ -55,8 +57,8 @@ class RunInputs:
     entity: str = ""
     period: str = ""
     cash_unit: str = "thousands"
-    materiality_abs: str = "50,000"
-    materiality_pct: str = "10"
+    materiality_abs: str = DEFAULT_ABS
+    materiality_pct: str = DEFAULT_PCT
     commentary: str = TEMPLATE
 
     def effective(self) -> "RunInputs":

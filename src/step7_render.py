@@ -34,6 +34,7 @@ import io
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
@@ -455,10 +456,12 @@ def pack_file_name(pack: Pack, format: str = "pdf") -> str:
     return f"{'_'.join(words) or 'entity'}_{period}_board_pack_{status}.{format}"
 
 
-def save_pack(pack: Pack, output_dir: Path, format: str = "pdf") -> Path:
+def save_pack(pack: Pack, output_dir: Path, format: str = "pdf",
+              now: Optional[str] = None) -> Path:
     """
     Write the rendered pack to output_dir and append a "rendered" event to
-    the audit log, linked to the review run by run_id.
+    the audit log, linked to the review run by run_id. now fixes the event's
+    timestamp, as for review().
     """
     data = render(pack, format)
     output_dir = Path(output_dir)
@@ -471,6 +474,6 @@ def save_pack(pack: Pack, output_dir: Path, format: str = "pdf") -> Path:
         "format": format,
         "file_name": path.name,
         "pdf_sha256": hashlib.sha256(data).hexdigest(),
-        "timestamp": _utc_now(),
+        "timestamp": now or _utc_now(),
     }, output_dir)
     return path

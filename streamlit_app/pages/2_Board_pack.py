@@ -21,9 +21,15 @@
 #   4. FINAL: the boxes turn read only and the PDF and audit lines are offered.
 #      "Start a new draft" clears the session and returns to step 1.
 #
+# "View a worked example" (W4): the signed sample pack and its audit lines,
+# built at release by scripts/build_worked_example.py, shown from those files
+# with downloads and a three-line walkthrough read from the audit. Nothing is
+# built when the tab opens.
+#
 # No pipeline logic lives here: the page imports only src.pipeline and its
-# lib modules. Each session writes to its own temporary folder, which goes
-# when the session ends or a new draft starts.
+# lib modules. Each session writes to its own temporary folder, deleted when
+# a new draft is built or started (and, failing that, when the object is
+# collected or the server process exits normally).
 # =============================================================================
 
 import html
@@ -39,18 +45,19 @@ if str(ROOT) not in sys.path:
 
 from config import ENTITY_NAME, KPIS_PATH, PERIOD, PNL_PATH
 from src.pipeline import (
-    DRIVERS_NOTE, SIGN_WORD, PackStatus, PipelineError, SectionType, audit_text,
-    check_text, commentary_source, drivers_rows, parse_materiality, pnl_notes, pnl_rows,
-    review_and_save, signoff_summary, when_text,
+    DRIVERS_NOTE, SIGN_WORD, PackStatus, PipelineError, SectionType,
+    audit_text, check_text, commentary_source, drivers_rows, parse_materiality, pnl_notes,
+    pnl_rows, review_and_save, signoff_summary, walkthrough, when_text,
 )
 from streamlit_app.lib import claude_client
+from streamlit_app.lib.content import worked_example
 from streamlit_app.lib.display import (
     drivers_table_html, narrative_html, pnl_table_html, status_chip,
 )
 from streamlit_app.lib.errors import friendly_message
 from streamlit_app.lib.inputs import (
-    CASH_CHOICES, MAX_MB, MAX_PNL_LINES, MODEL, OWN, SAMPLE, TEMPLATE, RunInputs, Upload,
-    build_draft,
+    CASH_CHOICES, DEFAULT_ABS, DEFAULT_PCT, MAX_MB, MAX_PNL_LINES, MODEL, OWN, SAMPLE,
+    TEMPLATE, RunInputs, Upload, build_draft,
 )
 from streamlit_app.lib.key_gate import render_key_gate
 from streamlit_app.lib.theme import header_html, inject_css
@@ -118,7 +125,7 @@ def _current_inputs() -> RunInputs:
         pnl=_upload(IN_PNL), kpis=_upload(IN_KPIS),
         entity=ss.get(IN_ENTITY, ""), period=ss.get(IN_PERIOD, ""),
         cash_unit=ss.get(IN_CASH, "thousands"),
-        materiality_abs=ss.get(IN_ABS, "50,000"), materiality_pct=ss.get(IN_PCT, "10"),
+        materiality_abs=ss.get(IN_ABS, DEFAULT_ABS), materiality_pct=ss.get(IN_PCT, DEFAULT_PCT),
         commentary=ss.get(IN_COMMENTARY, TEMPLATE),
     ).effective()
 
@@ -215,16 +222,16 @@ LABELS = {
     "kpis": "Key performance indicators: commentary",
     "cash": "Cash balance: commentary",
 }
-def _flags_html(flags, final: bool = False) -> str:
+def _flags_html(messages: list[str], final: bool = False) -> str:
     """
     The section's flags in their one display form (Flag.message, titled, the
     same words as the sign-off summary and the PDF). Escaped: the text can
     be the reviewer's. On a FINAL pack they are listed as acknowledged.
     """
-    if not flags:
+    if not messages:
         return '<p class="bp-note">No flags.</p>'
     lead = '<p class="bp-note">Acknowledged at sign-off:</p>' if final else ""
-    items = "".join(f"<li>{html.escape(f.message)}</li>" for f in flags)
+    items = "".join(f"<li>{html.escape(m)}</li>" for m in messages)
     return f'{lead}<ul class="bp-flags">{items}</ul>'
 
 
@@ -239,7 +246,8 @@ def _section_box(pack, section, final: bool) -> None:
         st.text_area(LABELS.get(key, section.title), key=_edit_key(key),
                      height=170 if key == SectionType.EXEC_SUMMARY.value else 110)
         text = st.session_state.get(_edit_key(key), section.narrative)
-    st.markdown(_flags_html(check_text(pack, key, text), final), unsafe_allow_html=True)
+    st.markdown(_flags_html([f.message for f in check_text(pack, key, text)], final),
+                unsafe_allow_html=True)
 
 
 def _signed_line(pack) -> str:
@@ -320,6 +328,41 @@ def _final_downloads(pack, result) -> None:
                        mime="application/jsonl", key=f"{PREFIX}dl_audit_session")
 
 
+# -- The worked example: shown from files, never built here -------------------------
+
+def _worked_example() -> None:
+    """The signed sample pack from generated/worked_example/: its walkthrough, downloads and pages."""
+    example = worked_example()
+    review, rendered = example["review"], example["rendered"]
+    st.markdown("#### A signed pack, from draft to sign-off")
+    st.markdown(
+        f"The sample pack for {review['entity']}, {review['period']}, reviewed and signed. "
+        "Nothing runs when this tab opens: the engine built these files at release, through "
+        "the same review a person goes through in the next tab.")
+    st.markdown("**The review in three lines**")
+    st.markdown("\n".join(f"{i}. {line}" for i, line in
+                          enumerate(walkthrough(review), start=1)))
+    left, right = st.columns(2)
+    left.download_button("Download the FINAL PDF", data=example["pdf"],
+                         file_name=example["pdf_name"], mime="application/pdf",
+                         key=f"{PREFIX}ex_pdf", on_click="ignore")
+    right.download_button("Download its audit lines (.jsonl)", data=example["audit_text"],
+                          file_name=f"{Path(example['pdf_name']).stem}_audit.jsonl",
+                          mime="application/jsonl", key=f"{PREFIX}ex_audit", on_click="ignore")
+    same = example["pages_drawn_from"] == example["pdf_sha256"] == rendered["pdf_sha256"]
+    st.caption(
+        "The pages below are images of the signed PDF itself. "
+        + ("They were drawn from the file whose SHA-256 its rendered audit line records, "
+           "checked as this page loaded." if same else
+           "They do not match the file its rendered audit line records.")
+        + " How it's built shows the audit lines as written.")
+    st.divider()
+    pages = example["pages"]
+    for i, page in enumerate(pages, start=1):
+        st.image(str(page), caption=f"Page {i} of {len(pages)}", width="stretch",
+                 output_format="PNG")
+
+
 # -- The inputs ------------------------------------------------------------------
 
 def _source_inputs() -> None:
@@ -383,7 +426,7 @@ def _commentary_inputs(has_key: bool) -> None:
 
 
 def _inputs(has_key: bool) -> None:
-    for key, value in ((IN_ABS, "50,000"), (IN_PCT, "10"), (IN_COMMENTARY, TEMPLATE)):
+    for key, value in ((IN_ABS, DEFAULT_ABS), (IN_PCT, DEFAULT_PCT), (IN_COMMENTARY, TEMPLATE)):
         st.session_state.setdefault(key, value)
     if not has_key:                        # no key, no model: the choice falls back
         st.session_state[IN_COMMENTARY] = TEMPLATE
@@ -429,10 +472,7 @@ has_key = render_key_gate() is not None
 example_tab, run_tab = st.tabs(["View a worked example", "Run it yourself"])
 
 with example_tab:
-    st.markdown("#### The signed sample pack")
-    st.write(
-        "This tab will show the signed sample pack and its audit trail, with no run "
-        "needed. Until then, run the sample yourself in the next tab.")
+    _worked_example()
 
 with run_tab:
     pack = st.session_state.get(PACK)

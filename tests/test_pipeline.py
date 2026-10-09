@@ -32,6 +32,7 @@ import ast
 import copy
 import csv
 import dataclasses
+import hashlib
 import io
 import json
 import os
@@ -2550,7 +2551,8 @@ class TestMain:
     def test_a_pnl_with_no_loadable_lines_stops(self, tmp_path):
         pnl = tmp_path / "pnl.csv"
         _write_csv(pnl, PNL_HEADER, [["Retail", "revenue", "n/a", "1", "1"]])
-        code, out = _main(["--pnl", str(pnl), "--draft-only", "--output", str(tmp_path)])
+        code, out = _main(["--pnl", str(pnl), "--entity", "Test Co", "--period", "September 2026",
+                           "--draft-only", "--output", str(tmp_path)])
         assert code == 2
         assert "Stopped: The P&L file has no lines that could be loaded" in out
 
@@ -2580,6 +2582,31 @@ class TestMain:
 
 
 # ── SHARED TABLES AND THE LIVE TEXT CHECK ─────────────────────────────
+
+class TestCliOwnFiles:
+    """Your own files on the command line carry their own entity, period and cash unit."""
+
+    def test_own_files_need_an_entity_and_a_period(self, tmp_path):
+        path = tmp_path / "pnl.csv"
+        _write_csv(path, PNL_HEADER, MESSY_ROWS)
+        code, out = _main(["--pnl", str(path), "--draft-only", "--output", str(tmp_path / "o")])
+        assert code == 2 and "give --entity and --period" in out
+        assert not (tmp_path / "o").exists()
+
+    def test_the_flags_reach_the_pack(self, tmp_path):
+        from config import PNL_PATH
+        kpis = tmp_path / "kpis.csv"
+        _write_csv(kpis, KPI_HEADER, [["Cash balance (GBP)", "1176000", "1350000", "1288000"]])
+        pnl = tmp_path / "pnl.csv"
+        pnl.write_bytes(PNL_PATH.read_bytes())
+        code, out = _main(["--pnl", str(pnl), "--kpis", str(kpis), "--entity", "Test Co",
+                           "--period", "September 2026", "--cash-unit", "pounds",
+                           "--draft-only", "--output", str(tmp_path / "o")])
+        assert code == 0 and "Data notes: none" in out
+        (pdf,) = (tmp_path / "o").glob("*.pdf")
+        assert pdf.name == "test_co_2026_09_board_pack_DRAFT.pdf"
+        assert "The cash balance was £1.18m" in _flat(_pdf_pages(pdf.read_bytes()))
+
 
 class TestSharedTables:
     def test_pnl_rows_are_finished_strings_in_board_order(self, pack):
@@ -3161,7 +3188,8 @@ class TestPlainNotes:
     def test_the_cli_prints_the_same_notes(self, tmp_path):
         path = tmp_path / "messy_pnl.csv"
         _write_csv(path, PNL_HEADER, MESSY_ROWS)
-        code, out = _main(["--pnl", str(path), "--draft-only", "--output", str(tmp_path / "o")])
+        code, out = _main(["--pnl", str(path), "--entity", "Northbridge Ltd", "--period",
+                           "August 2026", "--draft-only", "--output", str(tmp_path / "o")])
         assert code == 0
         flat = " ".join(out.split())
         assert ("Data notes: 1. P&L row 13 (Rent): the actual 'n/a' could not be read, so "
@@ -3325,3 +3353,136 @@ class TestCashUnitGuards:
         cash = Kpi(metric="Cash balance", actual=Decimal("1176000"), target=Decimal("1"))
         s = Subtotals(revenue_actual=Decimal("0"))
         assert cash_unit_notes([cash], s, 1000) == []
+
+
+# ── W4: THE WORKED EXAMPLE, AS COMMITTED ──────────────────────────────
+
+WORKED = ROOT / "generated" / "worked_example"
+
+
+def _worked_lines():
+    return [json.loads(l) for l in (WORKED / "audit.jsonl").read_text(encoding="utf-8").splitlines()]
+
+
+class TestWorkedExample:
+    """The files scripts/build_worked_example.py commits, checked against each other."""
+
+    def test_the_pdfs_hash_is_the_one_its_rendered_line_records(self):
+        from src.step1_load import file_sha256
+        (pdf,) = WORKED.glob("*.pdf")
+        review, rendered = _worked_lines()
+        assert (review["event"], rendered["event"]) == ("review", "rendered")
+        assert rendered["pdf_sha256"] == file_sha256(pdf)
+        assert rendered["file_name"] == pdf.name == "harmwell_foods_2026_06_board_pack_FINAL.pdf"
+
+    def test_the_run_ids_link(self):
+        review, rendered = _worked_lines()
+        assert review["run_id"] == rendered["run_id"] and len(review["run_id"]) == 32
+
+    def test_the_review_is_the_scripted_one(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import build_worked_example as script
+        review, rendered = _worked_lines()
+        assert review["status"] == "final" and review["mode"] == "interactive"
+        assert review["sign_off_by"] == script.REVIEWER
+        assert review["sign_off_at"] == review["timestamp"] == rendered["timestamp"] \
+            == script.SIGNED_AT
+        summary = next(x for x in review["sections"] if x["section"] == "exec_summary")
+        assert summary["edited"] and summary["final"] == summary["draft"] + script.REASON
+        assert review["acknowledged"] == [
+            "Executive summary: '£20k' matches no figure in the pack (in the reviewer's text)"]
+
+    def test_the_pdf_says_what_the_audit_says(self):
+        (pdf,) = WORKED.glob("*.pdf")
+        review, _ = _worked_lines()
+        text = _flat(_pdf_pages(pdf.read_bytes()))
+        assert "FINAL: signed off by A. Controller on 8 July 2026 at 09:00 UTC" in text
+        assert f"Review run: {review['run_id']}." in text
+        assert f"Code version: {review['code_version']}." in text
+
+    def test_a_fresh_build_says_what_the_committed_pdf_says(self, tmp_path):
+        # Only the run id and the code version may differ: anything else means
+        # the engine has changed and the worked example needs rebuilding.
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import build_worked_example as script
+        fresh = script.build(tmp_path, images=False)
+        (committed,) = WORKED.glob("*.pdf")
+
+        def text(pdf):
+            flat = _flat(_pdf_pages(pdf.read_bytes()))
+            flat = re.sub(r"Review run: [0-9a-f]{32}\.", "Review run: <id>.", flat)
+            return re.sub(r"Code version: [^ ]+\.", "Code version: <code>.", flat)
+        assert text(fresh["pdf"]) == text(committed)
+        (_, line_rendered) = [json.loads(l) for l in
+                              fresh["audit"].read_text(encoding="utf-8").splitlines()]
+        assert line_rendered["pdf_sha256"] == hashlib.sha256(fresh["pdf"].read_bytes()).hexdigest()
+        assert sorted(p.name for p in tmp_path.iterdir()) == sorted([committed.name, "audit.jsonl"])
+
+    def test_the_page_images_were_drawn_from_the_signed_pdf(self):
+        from pypdf import PdfReader
+        from src.step1_load import file_sha256
+        (pdf,) = WORKED.glob("*.pdf")
+        _, rendered = _worked_lines()
+        manifest = json.loads((WORKED / "pages.json").read_text(encoding="utf-8"))
+        assert manifest["pdf_name"] == pdf.name
+        assert manifest["pdf_sha256"] == file_sha256(pdf) == rendered["pdf_sha256"]
+        assert manifest["pages"] == [f"page_{i}.png" for i in
+                                     range(1, len(PdfReader(str(pdf)).pages) + 1)]
+        for name in manifest["pages"]:
+            assert (WORKED / name).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+        assert {p.name for p in WORKED.iterdir()} == {
+            pdf.name, "audit.jsonl", "pages.json", *manifest["pages"]}
+
+    def test_walkthrough_reads_the_audit(self):
+        from src.pipeline import walkthrough
+        review, _ = _worked_lines()
+        lines = walkthrough(review)
+        assert len(lines) == 3
+        assert lines[0].startswith("The template drafted the commentary for Harmwell Foods Ltd, "
+                                   "June 2026")
+        assert lines[1] == ("The reviewer, A. Controller, added a reason to the executive "
+                            "summary: \"The Retail shortfall followed a fortnight's closure of "
+                            "the Leeds site, which cost £20k in lost sales.\"")
+        assert lines[2] == ("Their figure, '£20k', matches no figure in the pack, so it was "
+                            "flagged; A. Controller acknowledged the flag and signed off on "
+                            "8 July 2026 at 09:00 UTC.")
+
+    def test_a_fixed_clock_reaches_every_timestamp(self, tmp_path):
+        from config import KPIS_PATH, PNL_PATH
+        from src.pipeline import run_pipeline
+        at = "2026-07-08T09:00:00+00:00"
+        result = run_pipeline(PNL_PATH, KPIS_PATH, tmp_path, ask=lambda t, x, w: x,
+                              confirm=lambda s: True, reviewer="A. Controller", now=at)
+        assert result.pack.sign_off_at == result.saved_at == at
+        assert {l["timestamp"] for l in _audit_lines(tmp_path)} == {at}
+
+
+class TestTestCounts:
+    """The counts the How it's built page shows are written by the run, for every class."""
+
+    def test_every_test_class_has_an_area(self):
+        from tests import conftest
+        classes = set()
+        for path in (ROOT / "tests").glob("test_*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            classes |= {n.name for n in tree.body
+                        if isinstance(n, ast.ClassDef) and n.name.startswith("Test")}
+        assert classes - set(conftest.AREA_OF) == set()
+
+    def test_the_committed_counts_add_up(self):
+        counts = json.loads((ROOT / "generated" / "test_counts.json").read_text(encoding="utf-8"))
+        assert counts["total"] == sum(a["tests"] for a in counts["by_area"]) \
+            == sum(counts["by_class"].values()) == sum(counts["by_suite"].values())
+        assert not any(a["area"].startswith("Test") for a in counts["by_area"])
+
+    def test_the_web_areas_hold_only_web_tests(self):
+        # The engine and web split and the "Web app" areas must agree, class by class.
+        from tests import conftest
+        counts = json.loads((ROOT / "generated" / "test_counts.json").read_text(encoding="utf-8"))
+        web_classes = {n.name for n in ast.parse(
+            (ROOT / "tests" / "test_web.py").read_text(encoding="utf-8")).body
+            if isinstance(n, ast.ClassDef) and n.name.startswith("Test")}
+        web_areas = {a for a in conftest.AREAS if a.startswith("Web app")}
+        assert {conftest.AREA_OF[c] for c in web_classes} == web_areas
+        assert counts["by_suite"]["web"] == sum(
+            a["tests"] for a in counts["by_area"] if a["area"] in web_areas)

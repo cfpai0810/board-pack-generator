@@ -2,3 +2,5 @@
 -r requirements.txt
 pytest==9.1.1
 pypdf==6.16.2
+# Build time only: scripts/build_worked_example.py draws the signed PDF's pages
+pypdfium2==5.14.0

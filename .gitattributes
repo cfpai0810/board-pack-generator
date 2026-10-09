@@ -6,3 +6,4 @@
 *.csv -text
 
 *.pdf binary
+*.png binary

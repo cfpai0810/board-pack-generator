@@ -56,3 +56,30 @@ def drivers_table_html(rows: list[DriverRow]) -> str:
     )
     return (f'<div class="bp-table-wrap"><table class="bp-table" style="width:auto">'
             f'<thead>{head}</thead><tbody>{body}</tbody></table></div>')
+
+
+def table_html(header: list[str], rows: list[list[str]], *, numeric: tuple[int, ...] = (),
+               wrap: tuple[int, ...] = (), caption: str = "") -> str:
+    """
+    A plain table in the pack's style, for the explanation pages: numeric
+    columns right aligned, text columns that may wrap (so the table fits a
+    phone), and a horizontal scroll if it still does not.
+    """
+    def cls(i: int) -> str:
+        return ' class="num"' if i in numeric else (' class="label"' if i in wrap else "")
+    head = "".join(f"<th{cls(i)}>{_E(h)}</th>" for i, h in enumerate(header))
+    body = "".join(
+        "<tr>" + "".join(f"<td{cls(i)}>{_E(c)}</td>" for i, c in enumerate(row)) + "</tr>"
+        for row in rows)
+    title = f"<caption>{_E(caption)}</caption>" if caption else ""
+    return (f'<div class="bp-table-wrap"><table class="bp-table bp-plain">{title}'
+            f"<thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>")
+
+
+def flow_html(steps: list[tuple[str, str]]) -> str:
+    """The pipeline as a column of numbered steps, each with what it owns."""
+    items = "".join(
+        f'<li><span class="bp-step">{i}. {_E(name)}</span>'
+        f'<span class="bp-owns">{_E(owns)}</span></li>'
+        for i, (name, owns) in enumerate(steps, start=1))
+    return f'<ol class="bp-flow">{items}</ol>'
