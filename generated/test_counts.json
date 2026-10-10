@@ -1,9 +1,9 @@
 {
   "written_by": "tests/conftest.py, after a full passing run of the suite",
-  "total": 570,
+  "total": 592,
   "by_suite": {
-    "engine": 492,
-    "web": 78
+    "engine": 512,
+    "web": 80
   },
   "by_area": [
     {
@@ -28,7 +28,7 @@
     },
     {
       "area": "Commentary and its checks",
-      "tests": 61
+      "tests": 63
     },
     {
       "area": "Review, sign-off and audit",
@@ -36,7 +36,7 @@
     },
     {
       "area": "The PDF",
-      "tests": 57
+      "tests": 62
     },
     {
       "area": "Command line",
@@ -51,8 +51,12 @@
       "tests": 11
     },
     {
+      "area": "One language: the glossary",
+      "tests": 13
+    },
+    {
       "area": "Web app: review stage",
-      "tests": 36
+      "tests": 38
     },
     {
       "area": "Web app: own files and the model",
@@ -72,9 +76,11 @@
     "TestCheckText": 5,
     "TestCliOwnFiles": 2,
     "TestCompute": 73,
+    "TestComputedText": 5,
     "TestContentPages": 7,
     "TestDirectionFlag": 6,
     "TestFormatting": 32,
+    "TestGlossary": 13,
     "TestGlyphsAndDraftRecord": 10,
     "TestItemKeys": 6,
     "TestLoad": 21,
@@ -82,7 +88,7 @@
     "TestModelChoice": 5,
     "TestNamedExclusions": 7,
     "TestNarrateModel": 12,
-    "TestNarrateTemplate": 14,
+    "TestNarrateTemplate": 16,
     "TestNarrativeSafeguards": 13,
     "TestNegativeCash": 3,
     "TestNumericCheck": 13,
@@ -95,7 +101,7 @@
     "TestRender": 43,
     "TestReview": 20,
     "TestReviewStage": 17,
-    "TestSampleRun": 6,
+    "TestSampleRun": 8,
     "TestSharedTables": 5,
     "TestStory": 9,
     "TestTableFormatting": 18,
