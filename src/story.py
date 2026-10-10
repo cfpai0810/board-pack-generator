@@ -6,9 +6,9 @@ A board reads a pack as a story: what happened to profit, where it came
 from, which lines moved it, then the detail. This module computes the
 pieces of that story from the figures step3 and step4 produced:
 
-    headline_sentence   EBIT against budget, in one sentence
-    standfirst          the same shortfall (or excess) by revenue, COGS and opex
-    ebit_walk           the steps from budget EBIT to actual EBIT, for a bridge chart
+    headline_sentence   EBIT against budget and last year, in one sentence
+    summary_line        the EBIT variance by revenue, COGS and opex, then last year
+    ebit_walk           the steps of the budget-to-actual bridge
     line_effects        each line's effect on profit against budget, largest first
     pnl_message         the P&L page's message: revenue against budget, how many
                         revenue lines were below it, and costs against budget
@@ -74,7 +74,7 @@ def _against(value: Decimal) -> str:
     return "on budget" if value == 0 else ("below budget" if value < 0 else "above budget")
 
 
-# -- The headline and the standfirst ---------------------------------------------------
+# -- The headline and the summary_line ---------------------------------------------------
 
 def headline_sentence(pack: Pack) -> str:
     """
@@ -87,7 +87,7 @@ def headline_sentence(pack: Pack) -> str:
             f"{against(s.ebit_var_py_abs, 'last year')}.")
 
 
-def standfirst(pack: Pack) -> str:
+def summary_line(pack: Pack) -> str:
     """
     Where the EBIT variance came from, and how the month compares with last
     year: 'Against budget, revenue was £112k lower, COGS £34k higher and opex
@@ -131,7 +131,7 @@ def standfirst(pack: Pack) -> str:
     return f"{text} Against last year, {grew}{', but' if contrast else ', and'} {held}."
 
 
-# -- The walk from budget EBIT to actual EBIT --------------------------------------------
+# -- The budget-to-actual bridge: from budget EBIT to actual EBIT ------------------------
 
 @dataclass(frozen=True)
 class WalkStep:

@@ -9,7 +9,7 @@
 
 import html
 
-from src.pipeline import DRIVERS_HEADER, PNL_HEADER, DriverRow, PnlRow
+from src.pipeline import DRIVERS_HEADER, PNL_HEADER, DriverRow, PnlRow, ScreenChart, Tile
 
 _E = html.escape
 
@@ -20,9 +20,37 @@ def status_chip(status: str) -> str:
     return f'<span class="bp-status {kind}">{_E(status.upper())}</span>'
 
 
-def narrative_html(text: str) -> str:
-    """A narrative block, line breaks kept."""
-    return f'<div class="bp-narrative">{_E(text).replace(chr(10), "<br>")}</div>'
+def headline_html(headline: str, summary_line: str) -> str:
+    """The pack's headline and its summary line, as the PDF opens."""
+    return (f'<p class="bp-headline">{_E(headline)}</p>'
+            f'<p class="bp-summary-line">{_E(summary_line)}</p>')
+
+
+def tiles_html(tiles: list[Tile]) -> str:
+    """The four headline tiles: each figure, then how it did against budget and last year."""
+    cells = "".join(
+        f'<div class="bp-tile"><div class="bp-tile-label">{_E(t.label)}</div>'
+        f'<div class="bp-tile-value">{_E(t.value)}</div>'
+        f'<div class="bp-tile-versus">{_E(t.budget)}</div>'
+        f'<div class="bp-tile-versus">{_E(t.last_year)}</div></div>'
+        for t in tiles)
+    return f'<div class="bp-tiles">{cells}</div>'
+
+
+def chart_html(chart: ScreenChart, *, title: bool = True) -> str:
+    """
+    A chart the PDF draws, as its SVG, no wider than half as large again as
+    it prints, so its labels read at the PDF's proportions; its caption beneath.
+    """
+    heading = f'<p class="bp-chart-title">{_E(chart.title)}</p>' if title else ""
+    caption = f'<p class="bp-note">{_E(chart.caption)}</p>' if chart.caption else ""
+    return (f'{heading}<div class="bp-chart" style="max-width:{chart.width * 3 // 2}px">'
+            f"{chart.svg}</div>{caption}")
+
+
+def commentary_html(text: str) -> str:
+    """A section's signed commentary, line breaks kept."""
+    return f'<div class="bp-commentary">{_E(text).replace(chr(10), "<br>")}</div>'
 
 
 def pnl_table_html(rows: list[PnlRow]) -> str:

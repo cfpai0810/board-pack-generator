@@ -4,7 +4,8 @@
 """
 The first real test of the step5 prompt. Builds the sample pack, calls
 narrate() with a real Anthropic client, and prints the four sections, the
-numeric and cause warnings, the model that answered and the token counts.
+numeric, cause and direction flags, the data notes, the model that answered
+and the token counts.
 
 This makes one paid API call. It is never run by the test suite (pytest
 only collects tests/, and the suite blocks the network).
@@ -76,7 +77,7 @@ def main() -> int:
     print("\nnumeric_warnings:", [f.message for f in pack.numeric_warnings] or "none")
     print("cause_warnings:", [f.message for f in pack.cause_warnings] or "none")
     print("direction_warnings:", [f.message for f in pack.direction_warnings] or "none")
-    print("warnings:", pack.warnings or "none")
+    print("data notes:", pack.warnings or "none")
     return 0
 
 

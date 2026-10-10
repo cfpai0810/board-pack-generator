@@ -37,8 +37,8 @@ def _home_page():
     st.markdown(inject_css(), unsafe_allow_html=True)
     st.markdown(header_html(
         "Board Pack Generator",
-        "A monthly management pack for a board: the figures computed in Python, "
-        "the commentary drafted inside them, and a named person's sign-off."),
+        "A monthly board pack: the figures computed in Python, the commentary drafted "
+        "inside them, and the reviewer's sign-off."),
         unsafe_allow_html=True)
     render_key_gate()
 
@@ -46,15 +46,16 @@ def _home_page():
     st.markdown(
         "- Reads a month's P&L and KPIs from two CSV files.\n"
         "- Computes every subtotal, variance and margin, and selects what is material by rule.\n"
-        "- Drafts the commentary from those figures only, with a template or, if you choose, the model.\n"
+        "- Drafts the commentary from those figures only, with a template or, if you choose, "
+        "the model (Claude, via the Anthropic API).\n"
         "- Produces a PDF board pack that is a DRAFT until a named reviewer signs it.")
 
     st.markdown("#### The governance promise")
     st.markdown(
         "- **Python computes.** Every number in the pack is calculated and tested in code.\n"
         "- **A rule selects.** What counts as material is a threshold, not the model's opinion.\n"
-        "- **The commentary narrates.** It says what moved and by how much, never why.\n"
-        "- **A person signs.** Nothing is final until a named reviewer reads it and signs.")
+        "- **The commentary reports.** It says what moved and by how much, never why.\n"
+        "- **The reviewer signs.** Nothing is final until a named reviewer reads it and signs.")
 
     st.markdown("#### Pages")
     st.page_link(HOW_BUILT, label="How the pack is built: materiality, Fav/(Adv), drivers and sign-off")

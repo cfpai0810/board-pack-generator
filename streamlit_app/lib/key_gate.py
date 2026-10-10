@@ -27,7 +27,7 @@ def render_key_gate():
     st.sidebar.markdown("### Your API key (optional)")
     st.sidebar.caption(
         "The commentary is drafted by a template by default, which needs no key. "
-        f"With your own Anthropic key, the model ({MODEL_ID}) can draft it instead, "
+        f"With your own key, the model (Claude, via the Anthropic API) can draft it instead, as {MODEL_ID}, "
         "inside the same figures and checks.")
 
     key = st.sidebar.text_input(

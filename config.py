@@ -45,9 +45,10 @@ CASH_KPI_METRIC = "Cash balance (GBP 000s)"
 # formatting, so the raw thousands figure never reaches a sentence.
 CASH_KPI_SCALE = 1000
 
-# -- Narrative model (step5, only when a client is injected) ------------------
-# Without a client the templated narrative runs; no key is needed. The model
-# matches the other live tools in the portfolio (P1 to P4), so a user's key
+# -- The model (step5, only when a client is injected) ------------------------
+# The model is Claude, via the Anthropic API, and this is the one place its id
+# is written. Without a client the template drafts the commentary; no key is
+# needed. The model matches the other live tools in the portfolio (P1 to P4), so a user's key
 # behaves the same across the series. No server-side fallback model: if the
 # configured model declines or fails, the template is the fallback.
 
@@ -58,7 +59,7 @@ NARRATIVE_MAX_TOKENS = 16000
 # -- Cause-word flag (model prose only) ---------------------------------------
 # Phrases that explain a variance rather than attribute it. "came mainly
 # from" and "drove" are deliberately absent: naming the lines behind a
-# variance is allowed, stating why it happened is the controller's job.
+# variance is allowed, stating why it happened is the reviewer's job.
 
 CAUSE_PHRASES = (
     "because", "due to", "owing to", "as a result of", "reflecting",
@@ -78,7 +79,7 @@ DIRECTION_PHRASES = (
 # -- Code version --------------------------------------------------------------
 # Recorded in the audit and on the PDF. The short git commit is used when
 # the project is a git repository; otherwise this constant. Bump it whenever
-# a change could alter a figure or the narrative from the same inputs.
+# a change could alter a figure or the commentary from the same inputs.
 
 VERSION = "1.1.0"
 

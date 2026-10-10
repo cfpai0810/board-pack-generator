@@ -13,7 +13,7 @@ it only narrates what this phase returns.
 
 Sign convention: every variance is raw actual minus comparator, for every
 category. A cost overspend is positive (Marketing vBud +37,640). Whether
-that is favourable or adverse is a presentation choice for the narrative
+that is favourable or adverse is a presentation choice for the commentary
 and the render, not something to bake into the numbers. The percentage
 denominator is abs(comparator), so a negative comparator (a loss-making
 budget, say) does not reverse the sign of the percentage.
@@ -23,7 +23,7 @@ rounded here (gross margin is 34.9696...%, shown as 35.0% only at
 display). No float enters this module. compute() pins the Decimal context
 so a caller that has changed the global precision cannot change a figure.
 
-Zero comparators: a percentage over a zero budget, prior year or revenue
+Zero comparators: a percentage over a zero budget, last year or revenue
 is not meaningful, so it is None and a note naming the line and the
 comparator joins the problems list. The absolute variance is still
 computed.
@@ -112,7 +112,7 @@ def compute_line_variances(pnl_lines: list[PnlLine]) -> list[str]:
             line.actuals, line.budget, line_subject(line.line_item), "budget", notes,
         )
         line.var_py_abs, line.var_py_pct = _variance(
-            line.actuals, line.prior_year, line_subject(line.line_item), "prior year", notes,
+            line.actuals, line.prior_year, line_subject(line.line_item), "last year", notes,
         )
     return notes
 
@@ -122,7 +122,7 @@ def compute_line_variances(pnl_lines: list[PnlLine]) -> list[str]:
 def _column_sums(
     pnl_lines: list[PnlLine], category: Category,
 ) -> tuple[Decimal, Decimal, Decimal]:
-    """(actual, budget, prior year) totals for one category; Decimal zero if it has no lines."""
+    """(actual, budget, last year) totals for one category; Decimal zero if it has no lines."""
     lines = [line for line in pnl_lines if line.category is category]
     return (
         sum((line.actuals for line in lines), _ZERO),
@@ -133,7 +133,7 @@ def _column_sums(
 
 def compute_subtotals(pnl_lines: list[PnlLine]) -> tuple[Subtotals, list[str]]:
     """
-    Build the Subtotals from the lines, for actual, budget and prior year.
+    Build the Subtotals from the lines, for actual, budget and last year.
 
     Revenue, COGS and opex are sums by category. Gross profit is revenue
     minus COGS; EBIT is gross profit minus opex; gross margin is gross
@@ -161,7 +161,7 @@ def compute_subtotals(pnl_lines: list[PnlLine]) -> tuple[Subtotals, list[str]]:
 
     zero_columns = [
         column for column, revenue
-        in (("actual", rev_a), ("budget", rev_b), ("prior year", rev_p))
+        in (("actual", rev_a), ("budget", rev_b), ("last year", rev_p))
         if revenue == _ZERO
     ]
     if zero_columns:
@@ -184,19 +184,19 @@ def compute_subtotals(pnl_lines: list[PnlLine]) -> tuple[Subtotals, list[str]]:
     )
 
     s.revenue_var_py_abs, s.revenue_var_py_pct = _variance(
-        s.revenue_actual, s.revenue_py, subtotal_subject("Revenue"), "prior year", notes,
+        s.revenue_actual, s.revenue_py, subtotal_subject("Revenue"), "last year", notes,
     )
     s.cogs_var_py_abs, s.cogs_var_py_pct = _variance(
-        s.cogs_actual, s.cogs_py, subtotal_subject("COGS"), "prior year", notes,
+        s.cogs_actual, s.cogs_py, subtotal_subject("COGS"), "last year", notes,
     )
     s.gross_profit_var_py_abs, s.gross_profit_var_py_pct = _variance(
-        s.gross_profit_actual, s.gross_profit_py, subtotal_subject("Gross profit"), "prior year", notes,
+        s.gross_profit_actual, s.gross_profit_py, subtotal_subject("Gross profit"), "last year", notes,
     )
     s.opex_var_py_abs, s.opex_var_py_pct = _variance(
-        s.opex_actual, s.opex_py, subtotal_subject("Opex"), "prior year", notes,
+        s.opex_actual, s.opex_py, subtotal_subject("Opex"), "last year", notes,
     )
     s.ebit_var_py_abs, s.ebit_var_py_pct = _variance(
-        s.ebit_actual, s.ebit_py, subtotal_subject("EBIT"), "prior year", notes,
+        s.ebit_actual, s.ebit_py, subtotal_subject("EBIT"), "last year", notes,
     )
 
     # Points from the full precision margins, never from rounded ones.
@@ -219,7 +219,7 @@ def compute_kpi_deltas(kpis: list[Kpi]) -> None:
     """
     Fill delta_target and delta_py on every KPI (actual minus comparator).
 
-    delta_py is None when the KPI has no prior year. A KPI with no actual
+    delta_py is None when the KPI has no figure for last year. A KPI with no actual
     can only arrive from outside the loader (step2 has warned); it gets no
     deltas rather than stopping the run.
     """
@@ -239,10 +239,10 @@ def add_gross_margin_kpi(
 
     Gross margin is computed from the P&L lines, so a separate gross margin
     row in kpis.csv would be a second source for the same number, and two
-    sources disagree sooner or later (the old sample row gave -4 vs prior
-    year where the P&L gives -3.7 points). Any input row with that name is
-    dropped with a note, and a derived KPI is appended: actual, target and
-    prior year are the actual, budget and prior year margins, and the
+    sources disagree sooner or later (the old sample row gave -4 against
+    last year where the P&L gives -3.7 points). Any input row with that name
+    is dropped with a note, and a derived KPI is appended: its actual, target
+    and prior_year are the actual, budget and last year's margins, and the
     deltas are the margin points fields. If the actual or budget margin
     cannot be computed (zero revenue, already noted), no KPI is added.
     """

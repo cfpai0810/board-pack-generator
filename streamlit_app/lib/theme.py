@@ -76,8 +76,8 @@ def inject_css() -> str:
       .bp-status.draft {{ background: {DRAFT}; }}
       .bp-status.final {{ background: {FINAL}; }}
 
-      /* Narrative block */
-      .bp-narrative {{
+      /* A section's commentary */
+      .bp-commentary {{
         background: {NEAR_WHITE};
         border-left: 3px solid {RULE};
         border-radius: 4px;
@@ -87,6 +87,31 @@ def inject_css() -> str:
         line-height: 1.6;
         color: {INK};
       }}
+
+      /* The PDF's opening: headline, summary line, tiles, charts */
+      [data-testid="stMarkdownContainer"] p.bp-headline {{
+        font-family: {SERIF}; font-size: 1.3rem; font-weight: 700; line-height: 1.35;
+        color: {INK}; margin: 4px 0 6px;
+      }}
+      [data-testid="stMarkdownContainer"] p.bp-summary-line {{
+        font-size: 0.95rem; line-height: 1.55; color: {INK}; margin: 0 0 10px;
+      }}
+      .bp-tiles {{
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 6px; margin: 4px 0 12px;
+      }}
+      .bp-tile {{ background: #F2F3F4; border-radius: 4px; padding: 8px 10px; }}
+      .bp-tile-label {{ font-size: 0.74rem; color: {MUTED}; }}
+      .bp-tile-value {{ font-size: 1.25rem; font-weight: 700; color: {INK}; margin: 1px 0 2px; }}
+      .bp-tile-versus {{ font-size: 0.76rem; color: {INK}; line-height: 1.35; }}
+      [data-testid="stMarkdownContainer"] p.bp-chart-title {{
+        font-weight: 600; font-size: 0.9rem; color: {INK}; margin: 8px 0 2px;
+      }}
+      [data-testid="stMarkdownContainer"] p.bp-message {{
+        font-size: 0.95rem; font-weight: 600; color: {INK}; margin: 2px 0 8px;
+      }}
+      .bp-chart {{ margin: 2px 0 4px; }}
+      .bp-chart svg {{ display: block; height: auto; }}
 
       /* Tables in the PDF's conventions */
       .bp-table-wrap {{ overflow-x: auto; margin: 6px 0 4px; }}

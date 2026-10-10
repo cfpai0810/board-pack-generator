@@ -11,9 +11,11 @@
 #      audit. Inputs changed after a draft exists need a new draft (sign-off
 #      waits until then), and unsaved edits are only discarded on request.
 #      The data notes and how the commentary was drafted are shown first.
-#   2. Review: each section is an editable box prefilled with the draft, its
-#      flags shown live beneath it from check_text. The drivers and P&L tables
-#      stay read only, as in the PDF.
+#   2. Review: the pack in the PDF's order. The headline, summary line and
+#      tiles, the charts and the tables come from the same src functions the
+#      PDF draws with, and stay read only. Each section's commentary is an
+#      editable box prefilled with the draft, its flags shown live beneath it
+#      from check_text.
 #   3. Sign-off: the summary review() will show (signoff_summary), a name box,
 #      a box for the word SIGN, and "Save as draft" or "Sign off". Both go
 #      through review_and_save: the engine decides, with the same checks, the
@@ -45,14 +47,17 @@ if str(ROOT) not in sys.path:
 
 from config import ENTITY_NAME, KPIS_PATH, PERIOD, PNL_PATH
 from src.pipeline import (
-    DRIVERS_NOTE, SIGN_WORD, PackStatus, PipelineError, SectionType,
-    audit_text, check_text, commentary_source, drivers_rows, parse_materiality, pnl_notes,
-    pnl_rows, review_and_save, signoff_summary, walkthrough, when_text,
+    CASH_HEADER, DRIVERS_NOTE, DRIVERS_TITLE, KPI_HEADER, KPI_NOTE, SIGN_WORD, PackStatus,
+    PipelineError, SectionType, audit_text, cash_cells, cash_note, check_text,
+    commentary_source, drivers_rows, excluded_rows_note, headline_sentence, headline_tiles,
+    kpi_rows, parse_materiality, pnl_message, pnl_notes, pnl_rows, review_and_save,
+    screen_charts, signoff_summary, summary_line, walkthrough, when_text,
 )
 from streamlit_app.lib import claude_client
 from streamlit_app.lib.content import worked_example
 from streamlit_app.lib.display import (
-    drivers_table_html, narrative_html, pnl_table_html, status_chip,
+    chart_html, commentary_html, drivers_table_html, headline_html, pnl_table_html, status_chip,
+    table_html, tiles_html,
 )
 from streamlit_app.lib.errors import friendly_message
 from streamlit_app.lib.inputs import (
@@ -217,7 +222,7 @@ def _keep_editing() -> None:
 # -- Rendering -------------------------------------------------------------------
 
 LABELS = {
-    "exec_summary": "Executive summary",
+    "exec_summary": "Executive summary: commentary",
     "pnl": "Profit and loss: commentary on material lines",
     "kpis": "Key performance indicators: commentary",
     "cash": "Cash balance: commentary",
@@ -240,7 +245,7 @@ def _section_box(pack, section, final: bool) -> None:
     key = section.section_type.value
     if final:
         st.markdown(f"**{LABELS.get(key, section.title)}**")
-        st.markdown(narrative_html(section.narrative), unsafe_allow_html=True)
+        st.markdown(commentary_html(section.narrative), unsafe_allow_html=True)
         text = section.narrative
     else:
         st.text_area(LABELS.get(key, section.title), key=_edit_key(key),
@@ -260,22 +265,56 @@ def _review_stage(pack, stale: bool = False) -> None:
     note = _signed_line(pack) if final else "Not signed off."
     st.markdown(f"{chip}&nbsp; {note}", unsafe_allow_html=True)
     if not final:
-        st.caption("Edit any section below; flags update as you type. The figures, the "
-                   "drivers table and the P&L table are computed and cannot be edited.")
+        st.caption("Edit any commentary below; flags update as you type. The headline, the "
+                   "summary line, the tiles, the charts and the tables are computed from the "
+                   "figures and cannot be edited.")
 
+    # The pack in the PDF's order, from the same src functions the PDF draws with
     sections = {s.section_type: s for s in pack.sections}
+    charts = screen_charts(pack)
+    warning = excluded_rows_note(pack) if pack.excluded_pnl_rows else ""
+
+    st.markdown("#### Executive summary")
+    st.markdown(headline_html(headline_sentence(pack), summary_line(pack)), unsafe_allow_html=True)
+    if warning:
+        st.warning(warning)
+    st.markdown(tiles_html(headline_tiles(pack)), unsafe_allow_html=True)
     _section_box(pack, sections[SectionType.EXEC_SUMMARY], final)
     drivers = drivers_rows(pack)
+    bridge, beside = st.columns(2) if drivers else (st.container(), None)
+    bridge.markdown(chart_html(charts["bridge"]), unsafe_allow_html=True)
     if drivers:
-        st.markdown("##### Main drivers of the variance against budget")
-        st.markdown(drivers_table_html(drivers), unsafe_allow_html=True)
-        st.markdown(f'<p class="bp-note">{html.escape(DRIVERS_NOTE)}</p>', unsafe_allow_html=True)
-    st.markdown("##### Profit and loss")
+        beside.markdown(f'<p class="bp-chart-title">{html.escape(DRIVERS_TITLE)}</p>'
+                        + drivers_table_html(drivers)
+                        + f'<p class="bp-note">{html.escape(DRIVERS_NOTE)}</p>',
+                        unsafe_allow_html=True)
+
+    st.markdown("#### Key performance indicators")
+    st.markdown(table_html(list(KPI_HEADER), [[label, *cells] for label, cells in kpi_rows(pack)],
+                           numeric=(1, 2, 3, 4, 5), wrap=(0,)), unsafe_allow_html=True)
+    st.markdown(f'<p class="bp-note">{html.escape(KPI_NOTE)}</p>', unsafe_allow_html=True)
+    _section_box(pack, sections[SectionType.KPIS], final)
+
+    st.markdown("#### Profit and loss")
+    st.markdown(f'<p class="bp-message">{html.escape(pnl_message(pack))}</p>',
+                unsafe_allow_html=True)
+    if warning:
+        st.warning(warning)
+    st.markdown(chart_html(charts["effects"]), unsafe_allow_html=True)
     st.markdown(pnl_table_html(pnl_rows(pack)), unsafe_allow_html=True)
     st.markdown("".join(f'<p class="bp-note">{html.escape(note)}</p>' for note in pnl_notes(pack)),
                 unsafe_allow_html=True)
-    for section_type in (SectionType.PNL, SectionType.KPIS, SectionType.CASH):
-        _section_box(pack, sections[section_type], final)
+    _section_box(pack, sections[SectionType.PNL], final)
+
+    st.markdown("#### Cash")
+    if "cash" in charts:
+        header = [f"{top} {unit}".strip() for top, unit in zip(*CASH_HEADER)]
+        st.markdown(chart_html(charts["cash"], title=False)
+                    + table_html(header, [["Cash balance", *cash_cells(pack)]],
+                                 numeric=(1, 2, 3, 4, 5), wrap=(0,))
+                    + f'<p class="bp-note">{html.escape(cash_note(pack))}</p>',
+                    unsafe_allow_html=True)
+    _section_box(pack, sections[SectionType.CASH], final)
 
     result = st.session_state.get(RESULT)
     if final:
@@ -417,12 +456,14 @@ def _commentary_inputs(has_key: bool) -> None:
              horizontal=True, disabled=not has_key)
     if has_key:
         st.markdown(
-            '<p class="bp-note">With Model, only the formatted figures and names in the pack '
-            f"facts are sent to {claude_client.MODEL_ID}, never your files. The figures, the "
+            f'<p class="bp-note">With Model, the model (Claude, via the Anthropic API) drafts it, as '
+            f"{claude_client.MODEL_ID}. Only the formatted figures and names in the facts are "
+            "sent to it, never your files. The figures, the "
             "materiality and the checks are the same either way, and if the call fails the "
             "template drafts instead.</p>", unsafe_allow_html=True)
     else:
-        st.caption("Add your Anthropic API key in the sidebar to draft with the model.")
+        st.caption("Add your Anthropic API key in the sidebar to have the model (Claude, via the Anthropic API) "
+                   "draft it.")
 
 
 def _inputs(has_key: bool) -> None:
@@ -465,7 +506,7 @@ def _run_notes(pack) -> None:
 st.markdown(inject_css(), unsafe_allow_html=True)
 st.markdown(header_html(
     "Board pack",
-    "The monthly management pack, from the source files to a PDF a named reviewer signs."),
+    "The monthly board pack, from the source files to a PDF the reviewer signs."),
     unsafe_allow_html=True)
 has_key = render_key_gate() is not None
 

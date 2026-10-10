@@ -20,10 +20,12 @@ status and materiality colours as the PDF.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from src.formatting import (
-    fav_adv, fav_adv_pct, margin_cell, pct, prose_money, pts_cell, table_value,
+    cash_pounds, fav_adv, fav_adv_pct, margin_cell, pct, prose_money, pts_cell, table_number,
+    table_value,
 )
 from src.state import SUBTOTALS, Category, Pack, SectionType, subtotal_key
 from src.story import against, meaningful, points_against
@@ -74,7 +76,7 @@ def _row(label, actual, budget, py, var_b, pct_b, var_py, pct_py, *, cost, mater
 
 def pnl_rows(pack: Pack) -> list[PnlRow]:
     """
-    Every P&L line grouped by category with its subtotal, then Gross profit,
+    Every P&L line grouped by category with its subtotal, then gross profit,
     EBIT and the gross margin row, in the order the board reads them.
     """
     s = pack.subtotals
@@ -141,6 +143,7 @@ def pnl_notes(pack: Pack) -> list[str]:
 
 # -- The drivers table ------------------------------------------------------------
 
+DRIVERS_TITLE = "Main drivers of the variance against budget"
 DRIVERS_HEADER = (("Subtotal", "Line", "Impact on profit"), ("", "", "Fav/(Adv) £"))
 
 # Subtotals whose drivers are tabulated: the ones that span categories, so
@@ -227,7 +230,7 @@ class DriverRow:
 
 def drivers_rows(pack: Pack) -> list[DriverRow]:
     """
-    Main drivers of the variance against budget, for Gross profit and EBIT
+    Main drivers of the variance against budget, for gross profit and EBIT
     when material. The impact is stored in profit terms already, so no flip:
     a line that lowered profit is bracketed, a genuine offset is plain.
     Empty when neither subtotal is material.
@@ -242,3 +245,38 @@ def drivers_rows(pack: Pack) -> list[DriverRow]:
                 impact=fav_adv(d["impact"], cost=False),
             ))
     return rows
+
+
+# -- The KPI and cash tables ----------------------------------------------------
+
+KPI_HEADER = ("", "Actual", "Target", "Prior year", "vs target", "vs prior year")
+CASH_HEADER = (KPI_HEADER, ("", "£", "£", "£", "£", "£"))
+
+
+def kpi_rows(pack: Pack) -> list[tuple[str, tuple[str, ...]]]:
+    """
+    Each KPI's label and its five cells, under the headers Actual, Target,
+    Prior year, vs target and vs prior year. The gross margin, derived from
+    the P&L, reads in % and points; other KPIs as plain figures, negatives in
+    brackets.
+    """
+    rows = []
+    for k in pack.section(SectionType.KPIS).figures["kpis"]:
+        if k["derived"]:
+            label = re.sub(r"\s*\([^)]*\)\s*$", "", k["metric"]) + ", from the P&L"
+            cells = (margin_cell(k["actual"]), margin_cell(k["target"]),
+                     margin_cell(k["prior_year"]), pts_cell(k["delta_target"]),
+                     pts_cell(k["delta_py"]))
+        else:
+            label = k["metric"]
+            cells = tuple(table_number(k[f]) for f in
+                          ("actual", "target", "prior_year", "delta_target", "delta_py"))
+        rows.append((label, cells))
+    return rows
+
+
+def cash_cells(pack: Pack) -> tuple[str, ...]:
+    """The cash balance in pounds, under the KPI table's headers; n/a where missing."""
+    figures = pack.section(SectionType.CASH).figures
+    return tuple("n/a" if figures[f] is None else table_value(cash_pounds(figures[f], pack.cash_scale))
+                 for f in ("actual", "target", "prior_year", "delta_target", "delta_py"))

@@ -2,12 +2,12 @@
 # notes.py: the one plain form of every note about the inputs and the run
 # =============================================================================
 """
-A note tells the person preparing the pack what the code did with their
-files that they might not expect: a row left out, a line kept under a
+A note tells whoever prepared the files what the code did with them
+that they might not expect: a row left out, a line kept under a
 label, a comparison that cannot be made, a figure worth a second look.
 
-Finance reasoning: these notes are read by the preparer and, through the
-review notes, by whoever signs. They must say what happened in the reader's
+Finance reasoning: these notes are read by whoever prepared the files and,
+through the review notes, by the reviewer. They must say what happened in the reader's
 terms (the file, the row, the line's name) and what the pack does about it,
 never in the code's terms (column keys, exception text). So every note has
 one form, built here from readable names:
@@ -22,7 +22,7 @@ these sentences, and the page that explains the rules (row_handling) quotes
 the same sentences the engine writes.
 
 A Note is a str (its message), so it joins, prints and compares as text
-wherever the warnings list is read. It also carries structured fields
+wherever the data notes are read. It also carries structured fields
 (kind, file, row, name), which the audit records beside the message.
 """
 
@@ -34,8 +34,8 @@ PNL, KPI_FILE, CASH, COMMENTARY = "pnl", "kpis", "cash", "commentary"
 MAX_NAME_LENGTH = 60
 NAMED_ROWS = 3          # the excluded rows named in full; the rest are counted
 
-_COLUMN_WORDS = {"actuals": "actual", "actual": "actual", "budget": "budget",
-                 "prior_year": "prior year", "target": "target"}
+_COLUMN_WORDS = {"actuals": "the actual", "actual": "the actual", "budget": "the budget",
+                 "prior_year": "last year's figure", "target": "the target"}
 _NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six",
                  7: "seven", 8: "eight", 9: "nine", 10: "ten"}
 
@@ -106,7 +106,7 @@ def unknown_category(row: int, name: str, category: str) -> Note:
 
 
 def unreadable_amount(row: int, name: str, column: str, raw: Optional[str]) -> Note:
-    return Note(f"{_row(PNL, row, name)}: the {_COLUMN_WORDS[column]} {_value(raw)}, "
+    return Note(f"{_row(PNL, row, name)}: {_COLUMN_WORDS[column]} {_value(raw)}, "
                 f"so the row was left out.",
                 kind="unreadable_amount", file=PNL, row=row, name=name)
 
@@ -149,7 +149,7 @@ def shared_name(name: str, n: int) -> Note:
 
 
 def subtotal_name(name: str, subtotal: str) -> Note:
-    return Note(f"P&L: the line '{name}' has the same name as the {subtotal} subtotal; "
+    return Note(f"P&L: the line '{name}' has the same name as the {prose_name(subtotal)} subtotal; "
                 f"it is kept as a separate line.", kind="subtotal_name", file=PNL, name=name)
 
 
@@ -185,21 +185,30 @@ def line_subject(name: str) -> str:
     return f"the line '{name}'"
 
 
+def prose_name(label: str) -> str:
+    """A subtotal's table label as prose writes it: 'Gross profit' reads 'gross profit'; 'COGS' and 'EBIT' stay."""
+    return label if label.isupper() else label.lower()
+
+
 def subtotal_subject(name: str) -> str:
-    return f"the {name} subtotal"
+    return f"the {prose_name(name)} subtotal"
 
 
 def zero_comparator(subject: str, against: str) -> Note:
-    """subject from line_subject or subtotal_subject; against is 'budget' or 'prior year'."""
-    the = "budget" if against == "budget" else "the prior year"
-    return Note(f"P&L: {subject} has a zero {against}, so its % variance against {the} "
+    """subject from line_subject or subtotal_subject; against is 'budget' or 'last year'."""
+    found = "has a zero budget" if against == "budget" else "was zero last year"
+    return Note(f"P&L: {subject} {found}, so its % variance against {against} "
                 f"is not meaningful (n/m).", kind="zero_comparator", file=PNL, name=subject)
 
 
+_FOR = {"actual": "the month", "budget": "the budget", "last year": "last year"}
+
+
 def zero_revenue(columns: list[str]) -> Note:
-    noun = "column" if len(columns) == 1 else "columns"
-    return Note(f"P&L: revenue is zero in the {and_join(columns)} {noun}, so the gross "
-                f"margin cannot be computed there.", kind="zero_revenue", file=PNL)
+    """columns among 'actual', 'budget' and 'last year'."""
+    them = "it" if len(columns) == 1 else "them"
+    return Note(f"P&L: revenue is zero for {and_join([_FOR[c] for c in columns])}, so the "
+                f"gross margin cannot be computed for {them}.", kind="zero_revenue", file=PNL)
 
 
 # -- KPI file -----------------------------------------------------------------------
@@ -215,7 +224,7 @@ def kpi_no_name(row: int) -> Note:
 
 
 def kpi_unreadable(row: int, metric: str, column: str, raw: Optional[str]) -> Note:
-    return Note(f"{_row(KPI_FILE, row, metric)}: the {_COLUMN_WORDS[column]} {_value(raw)}, "
+    return Note(f"{_row(KPI_FILE, row, metric)}: {_COLUMN_WORDS[column]} {_value(raw)}, "
                 f"so the KPI was left out.",
                 kind="kpi_unreadable", file=KPI_FILE, row=row, name=metric)
 
@@ -285,7 +294,7 @@ def model_missing(section_title: str) -> Note:
 def row_handling() -> list[tuple[str, str, Note]]:
     """
     (what is in the file, what the pack does, the note as the engine writes
-    it) for each kind of row a preparer may send. Built from the functions
+    it) for each kind of row a file may hold. Built from the functions
     above with example names, so the explanation cannot drift from the notes.
     """
     return [

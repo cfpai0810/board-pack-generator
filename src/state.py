@@ -5,7 +5,7 @@
 The typed objects every phase passes and receives. Money fields are Decimal.
 Variance and delta fields default to None; step3_compute fills them.
 
-Category is an enum of {REVENUE, COGS, OPEX}. The pack computes to EBIT
+Category is an enum of revenue, COGS and opex. The pack computes to EBIT
 (revenue minus COGS minus opex), not net income. A row whose category is
 not one of the three is rejected at load time.
 """
@@ -41,7 +41,7 @@ class Category(Enum):
 
 # -- Item keys ----------------------------------------------------------------
 # Placement lists, drivers and lookups hold stable KEYS, never display names,
-# so a line called "Revenue" cannot collide with the Revenue subtotal and two
+# so a line called "Revenue" cannot collide with the revenue subtotal and two
 # lines with the same name stay distinct. Display names live in the figures.
 
 # Subtotals in P&L order: (Subtotals field prefix, display name).
@@ -65,7 +65,7 @@ def line_key(position: int) -> str:
 
 
 class SectionType(Enum):
-    """The four sections of a v1 management pack."""
+    """The four sections of a v1 board pack."""
     EXEC_SUMMARY = "exec_summary"
     PNL = "pnl"
     KPIS = "kpis"
@@ -101,7 +101,7 @@ class PnlLine:
     line_item_blank records that the source row had no name. The loader
     keeps such a row (its money belongs in the subtotals), labels it with
     Category.unnamed_label (numbered when a category has several), and sets
-    this flag so step2 can still warn.
+    line_item_blank so step2 can still write its data note.
 
     key is the line's stable identity ("line:3", its 1-based position in
     the P&L), assigned by step4; it is what the placement lists hold.
@@ -235,10 +235,10 @@ class Kpi:
 @dataclass
 class Section:
     """
-    One section of the management pack (exec summary, P&L, KPIs, or cash).
+    One section of the board pack (executive summary, P&L, KPIs, or cash).
 
-    step4_assemble builds the section with its computed figures and an empty
-    narrative. step5_narrate fills the narrative and records who drafted it
+    step4_assemble builds the section with its computed figures and no
+    commentary. step5_narrate drafts the commentary and records who drafted it
     in drafted_by ("template" or "model"). The section is format-agnostic;
     step7_render reads it.
     """
@@ -294,7 +294,7 @@ class Flag:
                     f"PDF font and would appear as '?'")
         if self.kind == DIRECTION:
             return (f"'{self.text}' describes an offset; attribution belongs to the "
-                    f"computed drivers table, not the narrative")
+                    f"computed drivers table, not the commentary")
         return f"'{self.text}' may state a cause"
 
     @property
@@ -308,7 +308,7 @@ class Flag:
         return f"{SECTION_TITLES.get(self.section, self.section)}: {self.detail}{origin}"
 
 
-# -- Materiality flags --------------------------------------------------------
+# -- Materiality: what the rule selects ----------------------------------------
 
 @dataclass
 class MaterialFlags:
@@ -328,9 +328,9 @@ class MaterialFlags:
         lines in P&L order.
     material_subtotals: the material subtotals alone, in P&L order.
     drivers: for each material subtotal key, its top driver line keys by
-        absolute impact on profit. Context for the narrative, not featured.
-    materiality_abs, materiality_pct: the thresholds that produced these
-        flags, recorded so the audit can show which rule selected them.
+        absolute impact on profit. Shown as the computed drivers table, not featured.
+    materiality_abs, materiality_pct: the thresholds that made this
+        selection, recorded so the audit can show which rule selected them.
     """
     exec_summary_items: list[str] = field(default_factory=list)
     pnl_commentary_items: list[str] = field(default_factory=list)
@@ -346,10 +346,10 @@ class MaterialFlags:
 @dataclass
 class Pack:
     """
-    The top-level management pack object passed through the pipeline.
+    The top-level board pack object passed through the pipeline.
 
-    Built by step4_assemble (sections, material flags), filled by
-    step5_narrate (narrative), reviewed by step6_review (status, edits),
+    Built by step4_assemble (sections, the material items), filled by
+    step5_narrate (commentary), reviewed by step6_review (status, edits),
     rendered by step7_render. Format-agnostic: the renderer reads the Pack
     and emits bytes.
 
@@ -363,8 +363,8 @@ class Pack:
 
     pnl_sha256 and kpis_sha256 identify the exact input files. sign_off_at
     is the UTC time of sign-off, and acknowledged holds the sign-off
-    summary the reviewer confirmed: every warning outstanding when they
-    signed. run_id is the latest review run, so a render can link its
+    summary the reviewer confirmed: every flag and data note outstanding
+    when they signed. run_id is the latest review run, so a render can link its
     audit event to it; code_version is the code that computed the figures.
     cash_scale is what one unit of the cash KPI is worth in pounds (1000 when
     the file states cash in thousands, 1 when in pounds): an input of the

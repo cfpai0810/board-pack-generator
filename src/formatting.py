@@ -2,7 +2,7 @@
 # formatting.py: Shared Helpers: how a figure is written, in prose and tables
 # =============================================================================
 """
-One place that decides how every figure is written, so the narrative
+One place that decides how every figure is written, so the commentary
 (step5) and the rendered tables (step7) can never show the same figure two
 ways.
 

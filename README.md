@@ -1,11 +1,11 @@
 # Board Pack Generator
 
-Build a monthly management pack for a board from a P&L and a short file of
-KPIs: the figures computed in Python, the items that matter selected by a
-rule, the commentary drafted inside those figures, and a PDF that stays a
-DRAFT until a named person reviews it and signs. An optional AI layer can
-draft the commentary, but every figure, every selection and every
-attribution is the code's.
+Build a monthly board pack from a P&L and a short file of KPIs: the figures
+computed in Python, the items that matter selected by a rule, the commentary
+drafted inside those figures, and a PDF that stays a DRAFT until the
+reviewer, a named person, reads it and signs. If you choose, the model
+(Claude, via the Anthropic API) drafts the commentary, but every figure,
+every selection and every attribution is the code's.
 
 **Live demo:** [board-pack-generator.streamlit.app](https://board-pack-generator.streamlit.app)
 
@@ -16,9 +16,9 @@ entity.
 
 ## What it does
 
-You supply two CSV files: a P&L with the actual, budget and prior year for
-each line, and a KPI file (optional). The tool computes every subtotal,
-variance and margin, flags what is material against budget by rule, places
+You supply two CSV files: a P&L giving each line's actual, budget and last
+year's figure, and a KPI file (optional). The tool computes every subtotal,
+variance and margin, selects what is material against budget by rule, places
 each material item in the executive summary or the P&L commentary, computes
 the drivers of each material profit subtotal, and drafts the commentary from
 those figures only. A reviewer then edits the commentary, sees flags update as
@@ -26,13 +26,16 @@ they type, and signs with their name and the word SIGN. The output is a PDF
 board pack (DRAFT or FINAL) and a JSONL audit trail that links each review to
 the exact file it produced.
 
-The PDF reads as a story. Page 1 opens with a headline computed from the
-figures (EBIT against budget and last year) and a line on where the variance
-came from, then the headline figures, the commentary, a bridge from budget to
-actual EBIT beside the drivers table, and the KPIs. The P&L page opens with its
-own message and a chart of each line's effect on profit, then the full table;
-cash and the governance panel follow. Every sentence of that story is computed
-by rule and says what moved and by how much, never why.
+The PDF reads as a story. Page 1 opens with a headline (EBIT against budget
+and last year), a summary line on where the variance came from, and four tiles
+(revenue, gross profit, the gross margin and EBIT), then the commentary, the
+budget-to-actual bridge beside the drivers table, and the KPIs. The P&L page
+opens with its own message and a chart of each line's effect on profit, then
+the full table; cash and the governance panel follow. The headline, the
+summary line, the tiles, the charts and the P&L message are computed from the
+figures: they say what moved and by how much, never why, and the reviewer
+cannot edit them. The review screen shows them too, built by the same
+functions.
 
 Two ways to use it:
 
@@ -50,7 +53,10 @@ the model draft the commentary, enter your own Anthropic key in the sidebar.
 
 ## The design rule
 
-Python computes. A rule selects. The commentary narrates. A person signs.
+Python computes. A rule selects. The commentary reports. The reviewer signs.
+
+The words used across the project, from the PDF to the code's docstrings, are
+defined once in [docs/glossary.md](docs/glossary.md).
 
 **Figures.** Every figure is computed from the two files, in exact decimals,
 never floating point. Subtotals are computed, never read in. The gross margin
@@ -115,7 +121,7 @@ pnl.csv                    kpis.csv (optional)
 step1_load (CSV to typed records, exact decimals, a note for every unreadable row)
                |
                v
-step2_validate (no revenue, no costs, unnamed, duplicate or long names: warns, carries on)
+step2_validate (no revenue, no costs, unnamed, duplicate or long names: data notes, carries on)
                |
                v
 step3_compute (variances, subtotals, margins, the gross margin KPI)
@@ -221,7 +227,7 @@ config.py                        Layer 1: paths, thresholds, sample entity, mode
 src/
   state.py                       Shared types: lines, KPIs, sections, flags, the Pack
   step1_load.py                  Layer 2: CSV to typed records, amounts to Decimal
-  step2_validate.py              Layer 3: structural checks that warn and carry on
+  step2_validate.py              Layer 3: structural checks that note and carry on
   step3_compute.py               Layer 4: variances, subtotals, margins
   step4_assemble.py              Layer 5: materiality, placement, drivers, sections
   step5_narrate.py               Layer 6: template or model commentary, the checks
@@ -230,13 +236,14 @@ src/
   pipeline.py                    run_pipeline, and the one surface the web app uses
   notes.py                       Every data note, in one plain form
   formatting.py                  Every number as the reader sees it
-  tables.py                      The P&L and drivers tables as finished rows
+  story.py                       The headline, summary line, bridge and P&L message
+  tables.py                      The tables and headline tiles as finished rows
   explain.py                     What the explanation pages quote from a pack
 
 streamlit_app/
   Home.py                        Entry point, landing page, API key gate
   pages/
-    1_How_the_pack_is_built.py   The method, for the person who signs
+    1_How_the_pack_is_built.py   The method, for the reviewer
     2_Board_pack.py              The worked example, and a run of your own
     3_Your_own_data.py           The file formats, limits, privacy, running locally
     4_How_its_built.py           The pipeline, tests, audit trail, limitations
@@ -249,6 +256,7 @@ scripts/
 data/                            The sample P&L and KPI files
 generated/                       The worked example and the test counts
 tests/                           test_pipeline.py (engine), test_web.py (web app)
+docs/glossary.md                 The project's terms, and the variants it retired
 output/                          Generated packs and audit logs (gitignored)
 ```
 
@@ -303,7 +311,7 @@ does not. That is why the template is the default and the model an option.
 
 ## Tech stack
 
-Python 3.13 . Anthropic Claude API . Streamlit . reportlab . python-dotenv .
+Python 3.13 . Claude, via the Anthropic API . Streamlit . reportlab . python-dotenv .
 pytest
 
 ---

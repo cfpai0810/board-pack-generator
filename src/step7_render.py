@@ -4,7 +4,7 @@
 """
 Turn the Pack into the document that lands in front of the board.
 
-Finance reasoning: the PDF has to read like a real management pack. The
+Finance reasoning: the PDF has to read like a real board pack. The
 reader knows at once whether they hold a draft or the signed version (a
 filled status banner, and on a draft a diagonal watermark on every page, so
 a loose page cannot pass as final). The numbers follow the conventions a
@@ -35,6 +35,7 @@ import re
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Optional
 from xml.sax.saxutils import escape
 
@@ -42,6 +43,7 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
+from reportlab.graphics import renderSVG
 from reportlab.graphics.shapes import Drawing, Line, Rect, String
 from reportlab.lib.units import cm
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -51,19 +53,17 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from src.formatting import (
-    cash_pounds, margin_cell, pct, pts_cell, table_number, table_value, when_text,
-)
+from src.formatting import cash_pounds, pct, table_value, when_text
 from src.state import Pack, PackStatus, SectionType
 from src.story import (
-    ebit_walk, headline_sentence, line_effects, pnl_message, signed_money, standfirst,
+    ebit_walk, headline_sentence, line_effects, pnl_message, signed_money, summary_line,
 )
 from src.step5_narrate import TEMPLATE, clean_dashes
 from src.step6_review import _utc_now, excluded_rows_note, signoff_summary, write_audit
 from src.tables import (
-    DRAFT_HEX, DRIVERS_HEADER, DRIVERS_NOTE, FINAL_HEX, KPI_NOTE, LINE, cash_note,
-    MATERIAL_HEX, PNL_HEADER, RULE_HEX, SUBTOTAL, drivers_rows, headline_tiles, pnl_notes,
-    pnl_rows,
+    CASH_HEADER, DRAFT_HEX, DRIVERS_HEADER, DRIVERS_NOTE, DRIVERS_TITLE, FINAL_HEX, KPI_HEADER, KPI_NOTE, LINE,
+    MATERIAL_HEX, PNL_HEADER, RULE_HEX, SUBTOTAL, cash_cells, cash_note, drivers_rows,
+    headline_tiles, kpi_rows, pnl_notes, pnl_rows,
 )
 
 # -- Look: colour only for status and materiality -----------------------------
@@ -108,7 +108,7 @@ _TILE_VERSUS = ParagraphStyle("tile_versus", parent=_BASE, fontSize=7.5, leading
 _PANEL_TEXT = ParagraphStyle("panel", parent=_BASE, fontSize=8.5, leading=12)
 _HEADLINE = ParagraphStyle("headline", parent=_BASE, fontName="Helvetica-Bold", fontSize=14,
                            leading=18, spaceAfter=3)
-_STANDFIRST = ParagraphStyle("standfirst", parent=_BASE, fontSize=10, leading=14,
+_SUMMARY_LINE = ParagraphStyle("summary_line", parent=_BASE, fontSize=10, leading=14,
                              textColor=GREY, spaceAfter=10)
 _MESSAGE = ParagraphStyle("message", parent=_BASE, fontName="Helvetica-Bold", fontSize=10,
                           leading=14, spaceAfter=8)
@@ -223,7 +223,7 @@ def _pnl_table(pack: Pack) -> Table:
 
 def _drivers_block(pack: Pack, width=None) -> list:
     """
-    "Main drivers of the variance against budget": for Gross profit and
+    "Main drivers of the variance against budget": for gross profit and
     EBIT when material, each driver line with its impact on profit in
     Fav/(Adv) form. The impact is stored in profit terms already, so no
     flip: a line that lowered profit is bracketed, a genuine offset is
@@ -251,7 +251,7 @@ def _drivers_block(pack: Pack, width=None) -> list:
     table = Table(rows, colWidths=widths, hAlign="LEFT")
     table.setStyle(TableStyle(style))
     return [
-        _para("Main drivers of the variance against budget", _H3),
+        _para(DRIVERS_TITLE, _H3),
         table,
         Spacer(1, 4),
         _para(DRIVERS_NOTE, _SMALL),
@@ -404,6 +404,73 @@ def _cash_chart(figures: dict, scale, width: Decimal) -> Drawing:
     return drawing
 
 
+# -- The charts, named once for the PDF and the screen ------------------------------
+
+BRIDGE_TITLE = "The budget-to-actual bridge"
+BRIDGE_CAPTION = ("From budget EBIT to actual EBIT. Each step is that part of the P&L against "
+                  "budget, as its effect on profit: revenue below budget, or a cost above it, "
+                  "lowers profit.")
+EFFECTS_TITLE = "Each line's effect on profit against budget"
+EFFECTS_CAPTION = ("Largest first, each with its part of the P&L: to the left of the line "
+                   "lowered profit, to the right raised it. Material lines are dark and marked *.")
+_CHART_W = 8.3 * cm
+
+
+def _bridge(pack: Pack) -> Drawing:
+    return _walk_chart(pack, Decimal(str(_CHART_W - 12)), Decimal(170))
+
+
+def _effects(pack: Pack) -> Drawing:
+    return _effects_chart(pack, Decimal(str(TEXT_W)))
+
+
+def _cash(pack: Pack) -> Drawing:
+    return _cash_chart(pack.section(SectionType.CASH).figures, pack.cash_scale,
+                       Decimal(str(TEXT_W * 0.6)))
+
+
+@dataclass(frozen=True)
+class ScreenChart:
+    """A chart the PDF draws, as SVG for a web page, with the PDF's title and caption and its width in points."""
+    title: str
+    svg: str
+    caption: str
+    width: int
+
+
+_SVG_FONT = "Helvetica, Arial, sans-serif"
+
+
+def _svg(drawing: Drawing, title: str) -> str:
+    """
+    The drawing as inline SVG that scales to its column: the XML preamble
+    dropped, the width made relative (the viewBox keeps the proportions), the
+    PDF's font names given browser fallbacks, and the chart titled for a
+    screen reader.
+    """
+    text = renderSVG.drawToString(drawing)
+    text = text[text.index("<svg"):]
+    text = re.sub(r'<svg width="[^"]*" height="[^"]*"', '<svg width="100%"', text, count=1)
+    text = text.replace("<title>...</title>", f"<title>{escape(title)}</title>")
+    text = text.replace("<desc>...</desc>", "")
+    text = text.replace("font-family: Helvetica-Bold;", f"font-family: {_SVG_FONT}; font-weight: bold;")
+    return text.replace("font-family: Helvetica;", f"font-family: {_SVG_FONT};")
+
+
+def screen_charts(pack: Pack) -> dict[str, ScreenChart]:
+    """
+    The pack's charts for a web page, drawn by the same functions as the PDF:
+    the budget-to-actual bridge, each line's effect on profit, and the cash
+    balance when the KPI file gives one. Keys: "bridge", "effects", "cash".
+    """
+    charts = {"bridge": (BRIDGE_TITLE, _bridge(pack), BRIDGE_CAPTION),
+              "effects": (EFFECTS_TITLE, _effects(pack), EFFECTS_CAPTION)}
+    if pack.section(SectionType.CASH).figures["supplied"]:
+        charts["cash"] = ("Cash balance", _cash(pack), "")
+    return {key: ScreenChart(title, _svg(drawing, title), caption, _pt(drawing.width))
+            for key, (title, drawing, caption) in charts.items()}
+
+
 def _evidence(pack: Pack) -> list:
     """
     The summary's evidence, side by side: the bridge from budget to actual
@@ -411,15 +478,11 @@ def _evidence(pack: Pack) -> list:
     no material profit subtotal there are no drivers, and the bridge stands
     alone.
     """
-    chart_w = 8.3 * cm
-    walk = [_para("From budget to actual EBIT", _H3),
-            _walk_chart(pack, Decimal(str(chart_w - 12)), Decimal(170)),
-            _para("Each step is that part of the P&L against budget, as its effect on profit: "
-                  "revenue below budget, or a cost above it, lowers profit.", _CAPTION)]
-    drivers = _drivers_block(pack, BODY_W - chart_w - 24)
+    walk = [_para(BRIDGE_TITLE, _H3), _bridge(pack), _para(BRIDGE_CAPTION, _CAPTION)]
+    drivers = _drivers_block(pack, BODY_W - _CHART_W - 24)
     if not drivers:
         return [KeepTogether(walk)]
-    row = Table([[walk, drivers]], colWidths=[chart_w, BODY_W - chart_w])
+    row = Table([[walk, drivers]], colWidths=[_CHART_W, BODY_W - _CHART_W])
     row.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (1, 0), (1, 0), 18), ("RIGHTPADDING", (1, 0), (1, 0), 6),
@@ -445,29 +508,13 @@ def _tiles(pack: Pack) -> Table:
 
 
 def _kpi_table(pack: Pack) -> Table:
-    rows = [["", "Actual", "Target", "Prior year", "vs target", "vs prior year"]]
-    for k in pack.section(SectionType.KPIS).figures["kpis"]:
-        if k["derived"]:
-            label = re.sub(r"\s*\([^)]*\)\s*$", "", k["metric"]) + ", from the P&L"
-            cells = [margin_cell(k["actual"]), margin_cell(k["target"]),
-                     margin_cell(k["prior_year"]), pts_cell(k["delta_target"]),
-                     pts_cell(k["delta_py"])]
-        else:
-            label = k["metric"]
-            cells = [table_number(k[f]) for f in
-                     ("actual", "target", "prior_year", "delta_target", "delta_py")]
-        rows.append([_label(label, _LABEL_W - 12)] + cells)
+    rows = [list(KPI_HEADER)] + [[_label(label, _LABEL_W - 12), *cells]
+                                 for label, cells in kpi_rows(pack)]
     return _simple_table(rows)
 
 
-def _cash_table(figures: dict, scale) -> Table:
-    pounds = lambda v: "n/a" if v is None else table_value(cash_pounds(v, scale))
-    rows = [
-        ["", "Actual", "Target", "Prior year", "vs target", "vs prior year"],
-        ["", "£", "£", "£", "£", "£"],
-        ["Cash balance"] + [pounds(figures[f]) for f in
-                            ("actual", "target", "prior_year", "delta_target", "delta_py")],
-    ]
+def _cash_table(pack: Pack) -> Table:
+    rows = [list(CASH_HEADER[0]), list(CASH_HEADER[1]), ["Cash balance", *cash_cells(pack)]]
     return _simple_table(rows, header_rows=2)
 
 
@@ -517,12 +564,13 @@ def _governance(pack: Pack) -> list:
     flags = pack.material_flags
     model_sections = [s.title for s in pack.sections if s.drafted_by != TEMPLATE]
     template_sections = [s.title for s in pack.sections if s.drafted_by == TEMPLATE]
+    model = "the model (Claude, via the Anthropic API)"
     if not model_sections:
-        drafted = "the template (no model was used)"
+        drafted = f"the template; {model} was not used"
     elif not template_sections:
-        drafted = f"the model {pack.narrative_model}"
+        drafted = f"{model}, {pack.narrative_model}"
     else:
-        drafted = (f"the model {pack.narrative_model}; the template for "
+        drafted = (f"{model}, {pack.narrative_model}; the template for "
                    f"{', '.join(template_sections)}")
     edited = [s.title for s in pack.sections if s.edited]
     if pack.status is PackStatus.FINAL:
@@ -532,12 +580,13 @@ def _governance(pack: Pack) -> list:
     lines = [
         f"Entity and period: {pack.entity}, {pack.period}.",
         "Figures computed in tested Python from the source files.",
+        "Headline, summary line and table messages: computed from the figures.",
         f"Input files (SHA-256, first 12 characters): P&L {_short(pack.pnl_sha256)}, "
         + (f"KPIs {_short(pack.kpis_sha256)}." if pack.kpis_supplied
            else "KPIs not supplied (no KPI file)."),
         f"Code version: {pack.code_version or 'not recorded'}.",
         f"Materiality: a variance against budget of £{table_value(flags.materiality_abs)} "
-        f"or {pct(flags.materiality_pct)} or more, set by rule, not by the model.",
+        f"or {pct(flags.materiality_pct)} or more, set by rule.",
         f"Commentary drafted by: {drafted}.",
         f"Edited at review: {', '.join(edited) if edited else 'none'}.",
         signed,
@@ -568,13 +617,13 @@ def _story(pack: Pack) -> list:
 
     story = [
         _para(pack.entity, _H1),
-        _para(f"Monthly management pack, {pack.period}", _SUBTITLE),
+        _para(f"Monthly board pack, {pack.period}", _SUBTITLE),
         Spacer(1, 10),
         _banner(pack),
         Spacer(1, 2),
         # 1. The message, the numbers, the words, the evidence
         KeepTogether([*_heading("Executive summary"), _para(headline_sentence(pack), _HEADLINE),
-                      _para(standfirst(pack), _STANDFIRST),
+                      _para(summary_line(pack), _SUMMARY_LINE),
                       # the headline's totals carry the same warning as the P&L table
                       *([_boxed(excluded_rows_note(pack)), Spacer(1, 8)]
                         if pack.excluded_pnl_rows else []),
@@ -597,11 +646,7 @@ def _story(pack: Pack) -> list:
     statement = [*_heading("Profit and loss"), _para(pnl_message(pack), _MESSAGE)]
     if pack.excluded_pnl_rows:
         statement += [_boxed(excluded_rows_note(pack)), Spacer(1, 8)]
-    statement += [_para("Each line's effect on profit against budget", _H3),
-                  _effects_chart(pack, Decimal(str(TEXT_W))),
-                  _para("Largest first, each with its part of the P&L: to the left of the line "
-                        "lowered profit, to the right raised it. Material lines are dark and "
-                        "marked *.", _CAPTION)]
+    statement += [_para(EFFECTS_TITLE, _H3), _effects(pack), _para(EFFECTS_CAPTION, _CAPTION)]
     story += [
         KeepTogether([*statement, _pnl_table(pack)]),
         _para("Commentary on material lines", _H3),
@@ -614,9 +659,9 @@ def _story(pack: Pack) -> list:
         story += [
             KeepTogether([
                 *_heading("Cash"),
-                _cash_chart(cash.figures, pack.cash_scale, Decimal(str(TEXT_W * 0.6))),
+                _cash(pack),
                 Spacer(1, 8),
-                _cash_table(cash.figures, pack.cash_scale),
+                _cash_table(pack),
                 Spacer(1, 4),
                 _para(cash_note(pack), _SMALL),
             ]),
@@ -636,7 +681,7 @@ def _story(pack: Pack) -> list:
                         "until these are reviewed and it is signed off."),
                   Spacer(1, 6)]
         story += ([_para(f"{i}. {note}", _LIST) for i, note in enumerate(notes, start=1)]
-                  or [_para("No outstanding flags or warnings.")])
+                  or [_para("No outstanding flags or data notes.")])
     return story
 
 
@@ -661,7 +706,7 @@ def _page_decorator(pack: Pack, generated: str):
             canvas.setFillColor(GREY)
             canvas.setFont("Helvetica", 7)
             canvas.drawString(MARGIN, PAGE_H - 1.1 * cm,
-                              _safe(f"{pack.entity}: monthly management pack, {pack.period}"))
+                              _safe(f"{pack.entity}: monthly board pack, {pack.period}"))
             canvas.drawRightString(PAGE_W - MARGIN, PAGE_H - 1.1 * cm,
                                    pack.status.value.upper())
         canvas.setFillColor(GREY)
@@ -706,8 +751,8 @@ def _render_pdf(pack: Pack) -> bytes:
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
         leftMargin=MARGIN, rightMargin=MARGIN, topMargin=MARGIN, bottomMargin=1.8 * cm,
-        title=_safe(f"{pack.entity} management pack, {pack.period}"),
-        author="Board pack generator", subject=pack.status.value.upper(),
+        title=_safe(f"{pack.entity} board pack, {pack.period}"),
+        author="Board Pack Generator", subject=pack.status.value.upper(),
         invariant=1,
     )
     decorate = _page_decorator(pack, generated)

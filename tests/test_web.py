@@ -131,8 +131,8 @@ class TestPagesLoad:
     def test_home_states_the_governance_promise(self):
         at = _app("Home.py").run()
         text = _markdown(at)
-        for promise in ("Python computes.", "A rule selects.", "The commentary narrates.",
-                        "A person signs."):
+        for promise in ("Python computes.", "A rule selects.", "The commentary reports.",
+                        "The reviewer signs."):
             assert promise in text
 
 
@@ -144,7 +144,30 @@ class TestSampleRun:
         html = _markdown(sample_run)
         assert "(46,120)" in html and "35.0%" in html and "DRAFT" in html
         assert sample_run.text_area(key="bp_edit_exec_summary").value.startswith(
-            "Revenue was £2.48m, £112k (4.3%) below budget")
+            "Marketing was £298k, £38k (14.5%) above budget")
+
+    def test_opens_as_the_pdf_opens(self, sample_run):
+        """The headline, summary line and tiles, from the src functions the PDF draws them with."""
+        from html import escape
+        from src.pipeline import headline_sentence, headline_tiles, summary_line
+        pack, md = sample_run.session_state["bp_pack"], _markdown(sample_run)
+        assert headline_sentence(pack) == ("EBIT was a loss of £46k: £193k below budget and "
+                                           "£147k below last year.")
+        tiles = [escape(text) for t in headline_tiles(pack)
+                 for text in (t.label, t.value, t.budget, t.last_year)]
+        at = 0
+        for text in [escape(headline_sentence(pack)), escape(summary_line(pack)), *tiles]:
+            at = md.index(text, at) + len(text)        # each one after the one before
+        assert "£128k (5.5%) above last year" in tiles
+
+    def test_shows_the_charts_the_pdf_draws(self, sample_run):
+        md = _markdown(sample_run)
+        titles = ["The budget-to-actual bridge", "Each line's effect on profit against budget",
+                  "Cash balance"]
+        positions = [md.index(f"<title>{title}</title>") for title in titles]
+        assert positions == sorted(positions) and md.count("<svg") == 3
+        assert md.index("<title>The budget-to-actual bridge") < md.index("Main drivers of the")
+        assert md.index("Revenue was £112k (4.3%) below budget, with all three") < positions[1]
 
     def test_the_drivers_table_has_six_rows(self, sample_run):
         rows = re.findall(
@@ -408,7 +431,7 @@ class TestWebLayerBoundary:
     def test_the_summary_box_is_not_status_green(self):
         from streamlit_app.lib.theme import FINAL, inject_css
         css = inject_css()
-        start = css.index(".bp-narrative")
+        start = css.index(".bp-commentary")
         assert FINAL not in css[start:css.index("}", start)]
         assert css.count(FINAL) == 1          # green appears only on the FINAL chip
 
@@ -507,7 +530,7 @@ class TestOwnFiles:
         pdf = _final_pdf(at)
         assert at.session_state["bp_result"]["pdf_name"] == "test_co_2026_09_board_pack_FINAL.pdf"
         text = _pdf_text(pdf)
-        assert "Test Co Monthly management pack, September 2026" in text
+        assert "Test Co Monthly board pack, September 2026" in text
         assert "Entity and period: Test Co, September 2026." in text
         page = _text(at)
         for stale in ("Harmwell", "June"):
@@ -655,7 +678,8 @@ class TestModelChoice:
         at = _app(BOARD).run()
         radio = at.radio(key="in_commentary")
         assert radio.disabled and radio.value == "Template"
-        assert "Add your Anthropic API key in the sidebar to draft with the model." in _text(at)
+        assert ("Add your Anthropic API key in the sidebar to have the model (Claude, via "
+                "the Anthropic API) draft it.") in _text(at)
 
     def test_the_model_drafts_every_section_with_the_token_line(self, monkeypatch):
         from streamlit_app.lib import claude_client
@@ -666,7 +690,8 @@ class TestModelChoice:
         radio = at.radio(key="in_commentary")
         assert not radio.disabled
         radio.set_value("Model").run()
-        assert "only the formatted figures and names in the pack facts are sent to" in _text(at)
+        assert ("Only the formatted figures and names in the facts are sent to it, never "
+                "your files.") in _text(at)
         at.button(key="bp_run").click().run()
         assert not at.exception, at.exception
         pack = at.session_state["bp_pack"]

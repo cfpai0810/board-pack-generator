@@ -27,13 +27,13 @@ STEPS = [
     ("Load", "Reads the two CSV files into typed records. Every amount becomes an exact "
              "decimal; a row that cannot be read is noted, never dropped silently."),
     ("Validate", "Checks that the records would not mislead: no revenue, no costs, unnamed "
-                 "or duplicate lines. It warns and carries on."),
+                 "or duplicate lines. It writes a data note and carries on."),
     ("Compute", "Every variance, subtotal and margin, and the gross margin KPI, from the "
                 "lines."),
     ("Assemble", "The materiality rule, where each item is discussed, the drivers, and the "
                  "four sections of the pack."),
-    ("Narrate", "The commentary, by the template or the model, inside the figures; then the "
-                "numeric, cause and direction checks."),
+    ("Draft", "The commentary, by the template or the model (Claude, via the Anthropic API), inside the "
+              "figures; then the numeric, cause and direction checks."),
     ("Review", f"Edits, flags, sign-off with a name and {SIGN_WORD}, and the review line in "
                "the audit trail."),
     ("Render", "The PDF, DRAFT or FINAL, and the rendered line with the file's SHA-256."),
@@ -131,5 +131,5 @@ st.markdown(
     "computed, the model's wording adds little that the template does not. That is why the "
     "template is the default and the model an option.")
 st.page_link("pages/1_How_the_pack_is_built.py",
-             label="How the pack is built: the method, for the person who signs",
+             label="How the pack is built: the method, for the reviewer",
              icon=":material/menu_book:")

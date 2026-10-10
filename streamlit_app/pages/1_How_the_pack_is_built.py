@@ -1,7 +1,7 @@
 # =============================================================================
 # pages/1_How_the_pack_is_built.py: the method, for a finance reader
 # =============================================================================
-# For the person who will sign the pack: what is computed, what a rule
+# For the reviewer, who signs the pack: what is computed, what a rule
 # decides, how variances read, why attribution is computed, what the
 # commentary may and may not say, and what signing means. Every figure
 # quoted is the sample pack's, built by the engine at page load
@@ -21,7 +21,7 @@ if str(ROOT) not in sys.path:
 from config import NARRATIVE_MODEL
 from src.pipeline import (
     DRIVERS_NOTE, SIGN_WORD, count_words, drivers_rows, fav_adv_examples, headline,
-    material_items, placement_example, thresholds,
+    headline_sentence, material_items, placement_example, thresholds,
 )
 from streamlit_app.lib.content import sample_pack
 from streamlit_app.lib.display import drivers_table_html, table_html
@@ -35,7 +35,7 @@ items = material_items(pack)
 st.markdown(inject_css(), unsafe_allow_html=True)
 st.markdown(header_html(
     "How the pack is built",
-    "The method in plain terms, for the person who will sign the pack."),
+    "The method in plain terms, for the reviewer who will sign the pack."),
     unsafe_allow_html=True)
 st.markdown(
     f"Every example on this page comes from the sample pack for {pack.entity}, "
@@ -43,8 +43,8 @@ st.markdown(
 
 st.markdown("#### Figures")
 st.markdown(
-    "Every figure is computed in Python from two files: a P&L with the actual, budget and "
-    "prior year for each line, and a short file of KPIs. Subtotals are computed, never read "
+    "Every figure is computed in Python from two files: a P&L giving each line's actual, "
+    "budget and last year's figure, and a short file of KPIs. Subtotals are computed, never read "
     "in: revenue, COGS and opex are the sums of their lines, gross profit is revenue less "
     "COGS, and EBIT is gross profit less opex. "
     f"In the sample, {top['revenue_lines']} to revenue of {top['revenue']}, and EBIT is "
@@ -54,9 +54,24 @@ st.markdown(
     "when they are shown. The gross margin is computed from the P&L too: a gross margin row "
     "in the KPI file is ignored, so each number in the pack has one source.")
 
+st.markdown("#### The headline, the tiles and the charts")
+st.markdown(
+    "Page 1 of the pack opens with a headline, a summary line under it and four tiles, and "
+    "the pack carries two charts: the budget-to-actual bridge and each line's effect on "
+    "profit. All of them are computed from the figures by code, the same way every time; "
+    "the commentary does not write them and the reviewer cannot edit them. The headline "
+    "gives EBIT against budget and last year: on the sample, "
+    f"“{headline_sentence(pack)}” The summary line says how far revenue, COGS and "
+    "opex moved against budget, and how revenue and the gross margin compare with last "
+    "year. The tiles give revenue, gross profit, the gross margin and EBIT, each against "
+    "budget and last year. The bridge steps from budget EBIT to actual EBIT through revenue, "
+    "COGS and opex, and the effects chart ranks each line by its effect on profit. The "
+    "numeric check runs on this text as well, and a test requires it to raise no flag.")
+
 st.markdown("#### Materiality")
 st.markdown(
-    "What the pack discusses is decided by a rule, not by the model. A line or subtotal is "
+    "What the pack discusses is decided by a rule, not by the model (Claude, via the Anthropic API). A line or "
+    "subtotal is "
     f"material when its variance against budget is {abs_text} or more, or {pct_text} of "
     "budget or more. The percentage test is not applied across a change of sign, where a "
     "percentage means nothing. Both thresholds can be changed for your own run on the Board "

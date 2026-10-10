@@ -6,7 +6,7 @@ Run the board pack generator end to end.
 
     python main.py                         review at the terminal, sign with SIGN
     python main.py --draft-only            no prompts: a DRAFT pack and its review notes
-    python main.py --use-model             draft the commentary with the model
+    python main.py --use-model             have the model (Claude, via the Anthropic API) draft the commentary
     python main.py --pnl my_pnl.csv --kpis my_kpis.csv --output out/
 
 main() only parses the arguments, builds the terminal ask and confirm (and
@@ -131,8 +131,8 @@ def build_client(use_model: bool):
     a key is available.
     """
     if not use_model:
-        return None, ("Commentary: the template (add --use-model to draft with "
-                      f"the model {NARRATIVE_MODEL}).")
+        return None, ("Commentary: the template. Add --use-model to have the model (Claude, via the Anthropic API) "
+                      f"draft it, as {NARRATIVE_MODEL}.")
     if ENV_FILE.is_file():
         try:
             from dotenv import load_dotenv
@@ -147,8 +147,8 @@ def build_client(use_model: bool):
     except ImportError:
         return None, ("Commentary: the template. --use-model was given, but the "
                       "anthropic package is not installed (pip install -r requirements.txt).")
-    return anthropic.Anthropic(), (f"Commentary: the model {NARRATIVE_MODEL}, with the "
-                                   f"template as fallback.")
+    return anthropic.Anthropic(), (f"Commentary: the model (Claude, via the Anthropic API), as {NARRATIVE_MODEL}, with "
+                                   f"the template as fallback.")
 
 
 # -- Arguments ------------------------------------------------------------------
@@ -182,7 +182,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--cash-unit", choices=sorted(CASH_UNITS), default=None,
                         help="the unit the KPI file states cash in (default: thousands)")
     parser.add_argument("--use-model", action="store_true",
-                        help="draft the commentary with the model; reads ANTHROPIC_API_KEY "
+                        help="have the model (Claude, via the Anthropic API) draft the commentary; reads ANTHROPIC_API_KEY "
                              "from the environment or .env, never from an argument")
     parser.add_argument("--draft-only", action="store_true",
                         help="no review prompts: write a DRAFT pack with its review notes")

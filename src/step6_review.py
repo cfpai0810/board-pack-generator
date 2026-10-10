@@ -2,16 +2,16 @@
 # step6_review.py: Layer 7: human review, sign-off, and the audit record
 # =============================================================================
 """
-The controller reads every section, edits or accepts it, sees every
+The reviewer reads every section, edits or accepts it, sees every
 outstanding flag, and signs, or does not.
 
 Finance reasoning: the pack is not a pack until a person owns it. The code
 computed the numbers and the model or the template drafted the words, but
 signing off is a human act of responsibility. This is also where the
-reasons go in: the controller knows the factory was closed and the model
-does not. So review lets the controller edit every narrative (and only the
-narrative: figures, flags and drivers are computed and cannot be changed
-here), shows them every outstanding flag before they sign, and records
+reasons go in: the reviewer knows the factory was closed and the model
+does not. So review lets the reviewer edit every section's commentary (and
+only the commentary: figures, flags and drivers are computed and cannot be
+changed here), shows them every outstanding flag before they sign, and records
 exactly what was drafted, what they changed and what they accepted
 knowingly.
 
@@ -245,7 +245,7 @@ def check_text(pack: Pack, section: str, text: str) -> list[Flag]:
 def signoff_summary(pack: Pack) -> list[str]:
     """
     Everything the reviewer should see before signing: outstanding numeric,
-    cause, direction and glyph flags, load, validation and narrate warnings, and a plain
+    cause, direction and glyph flags, the data notes, and a plain
     statement when the totals exclude rows that could not be loaded.
     """
     summary = [f.message for f in outstanding_flags(pack)]
@@ -275,7 +275,7 @@ def _flag_record(flag: Flag) -> dict:
 
 def headline_figures(pack: Pack) -> dict:
     """
-    The five subtotals and the gross margin, actual, budget and prior year,
+    The five subtotals and the gross margin, actual, budget and last year,
     as exact strings: what the board saw, readable in the JSONL without
     rerunning anything.
     """

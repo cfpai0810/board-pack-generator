@@ -123,7 +123,8 @@ st.markdown(
     "the app restarts.")
 st.markdown(
     "An API key, if you give one, is held in the server's memory for your session only, used "
-    "to make the call, and never stored or logged. When the model drafts the commentary, it "
+    "to make the call, and never stored or logged. When the model (Claude, via the Anthropic API) drafts the "
+    "commentary, it "
     "receives only the formatted figures and names in the pack facts, never your files.")
 st.page_link("pages/4_How_its_built.py",
              label="How it's built: exactly what the model receives for the sample",

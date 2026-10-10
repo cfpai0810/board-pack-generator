@@ -4,8 +4,8 @@
 """
 run_pipeline() is the whole governance story as one flow: the code loads,
 checks and computes every figure, the rule selects what is material, the
-narrative is drafted inside those figures, a named person reviews and
-signs, and the pack is rendered with its audit trail.
+commentary is drafted inside those figures, the reviewer reads and signs,
+and the pack is rendered with its audit trail.
 
 Finance reasoning: a headless run must never produce a signed pack, because
 signing without a person reading is exactly what the tool exists to
@@ -62,10 +62,12 @@ from src.step6_review import (
     Confirm, _utc_now, answers_ask, audit_text, check_text, confirm_by_word,
     excluded_rows_note, is_sign_word, preview_signoff, record_draft, review,
 )
-from src.step7_render import save_pack
+from src.step7_render import ScreenChart, save_pack, screen_charts
+from src.story import headline_sentence, pnl_message, summary_line
 from src.tables import (
-    DRAFT_HEX, DRIVERS_HEADER, DRIVERS_NOTE, FINAL_HEX, MATERIAL_HEX, PNL_HEADER,
-    RULE_HEX, DriverRow, PnlRow, commentary_source, drivers_rows, pnl_notes, pnl_rows,
+    CASH_HEADER, DRAFT_HEX, DRIVERS_HEADER, DRIVERS_NOTE, DRIVERS_TITLE, FINAL_HEX, KPI_HEADER, KPI_NOTE,
+    MATERIAL_HEX, PNL_HEADER, RULE_HEX, DriverRow, PnlRow, Tile, cash_cells, cash_note,
+    commentary_source, drivers_rows, headline_tiles, kpi_rows, pnl_notes, pnl_rows,
 )
 
 __all__ = [
@@ -82,8 +84,11 @@ __all__ = [
     # the review stage
     "review_and_save", "signoff_summary", "check_text", "audit_text",
     "is_sign_word", "SIGN_WORD", "NAME_WARNING", "SIGN_WARNING",
-    # what a page displays
+    # what a page displays: the PDF's own text, rows and charts
+    "headline_sentence", "summary_line", "pnl_message", "headline_tiles", "Tile",
+    "excluded_rows_note", "screen_charts", "ScreenChart",
     "pnl_rows", "drivers_rows", "PnlRow", "DriverRow", "PNL_HEADER", "DRIVERS_HEADER",
+    "DRIVERS_TITLE", "kpi_rows", "KPI_HEADER", "KPI_NOTE", "cash_cells", "CASH_HEADER", "cash_note",
     "pnl_notes", "DRIVERS_NOTE", "when_text", "SECTION_TITLES", "commentary_source",
     "row_handling",
     "DRAFT_HEX", "FINAL_HEX", "MATERIAL_HEX", "RULE_HEX",
@@ -234,7 +239,7 @@ def build_pack(
     """
     The narrated DRAFT pack from the files, with nothing reviewed, rendered
     or written: for pages that explain the method on the sample. The same
-    load, checks, computation, selection and narrative as run_pipeline.
+    load, checks, computation, selection and commentary as run_pipeline.
     """
     return _build(pnl_path, kpis_path, client=client, materiality_abs=materiality_abs,
                   materiality_pct=materiality_pct, entity=entity, period=period,

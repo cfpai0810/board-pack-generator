@@ -25,10 +25,10 @@ def friendly_message(exc: BaseException) -> str:
         return ("Your account hit a rate limit. Wait a moment and try again. If it "
                 "keeps happening, check your usage limits in the Anthropic console.")
     if isinstance(exc, anthropic.APIStatusError):
-        return ("The AI service returned an error and could not complete the "
+        return ("The Anthropic API returned an error and could not complete the "
                 "request. This is usually temporary; please try again shortly.")
     if isinstance(exc, anthropic.APIConnectionError):
-        return "Could not reach the AI service. Check your connection and try again."
+        return "Could not reach the Anthropic API. Check your connection and try again."
 
     if exc.__class__.__name__ == "NoKeyError":
         return ("Paste your Anthropic API key in the sidebar to draft the commentary "

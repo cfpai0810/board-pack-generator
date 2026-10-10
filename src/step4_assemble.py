@@ -4,14 +4,14 @@
 """
 Build the Pack: select what is material by rule, place each material item
 once, record the lines that drove each material subtotal, and lay out the
-four sections with their figures and empty narratives.
+four sections with their figures, ready for the commentary.
 
 Finance reasoning: a board pack is editorial judgement, made safe here by
 turning the judgement into a rule. What counts as material is a threshold
 on the computed variance against budget, not the model's opinion; the
-model later explains the items this phase selected and never chooses
-them. Both arms of the rule are inclusive and the percentage is compared
-at full precision, so 9.96% (shown as 10.0%) is not material. Prior year
+commentary later describes the items this phase selected and never
+chooses them. Both arms of the rule are inclusive and the percentage is compared
+at full precision, so 9.96% (shown as 10.0%) is not material. Last year
 does not drive materiality.
 
 De-dup: a material line under a material subtotal would feature the same
@@ -22,14 +22,13 @@ after the subtotals.
 
 Drivers: a line can drive a material subtotal without being material
 itself (Ingredients, +4.1% vs budget, is the main cost behind the fall in
-gross profit). Drivers are context for the narrative, not featured items,
-so the narrative can name them without a new figure: the impact is the
-line's own budget variance, sign flipped for costs so that it reads as the
-effect on profit.
+gross profit). Drivers are a computed table under the executive summary,
+not featured items: the impact is the line's own budget variance, sign
+flipped for costs so that it reads as the effect on profit.
 
 Keys: every list and the drivers map hold item keys ("subtotal:revenue",
 "line:3"), assigned here from P&L position, never display names. A line
-called "Revenue" therefore cannot collide with the Revenue subtotal.
+called "Revenue" therefore cannot collide with the revenue subtotal.
 
 No model runs here, and no number is computed beyond that sign flip; every
 figure is read from step3's output. Absolute values and negation use
@@ -393,13 +392,13 @@ def assemble(
     excluded_rows: tuple = (),
 ) -> Pack:
     """
-    Flag materiality, de-dup, find drivers, and build the DRAFT Pack.
+    Apply the materiality rule, de-dup, find drivers, and build the DRAFT Pack.
 
     The thresholds default to config and are keyword parameters so tests
     and the web layer can change them without touching config. They cross
     the Decimal boundary here via Decimal(str(x)), so an int from a UI
-    control is safe. The problems list becomes Pack.warnings (the same
-    list, with any cash warning appended). The input file hashes from
+    control is safe. The problems list becomes Pack.warnings, the data
+    notes (the same list, with any cash note appended). The input file hashes from
     step1 are carried onto the Pack for the audit. entity, period and
     cash_scale are inputs of the run; left as None they come from config
     (the sample), and everything downstream reads them from the Pack.

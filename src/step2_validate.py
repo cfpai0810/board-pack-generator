@@ -5,21 +5,21 @@
 Sanity-check the loaded P&L lines and KPIs before any computation.
 
 Finance reasoning: validation here does not ask whether the numbers are
-right (that is the preparer's job). It asks whether a pack built from them
+right (that is for whoever prepared the files). It asks whether a pack built from them
 would mislead. A P&L with no revenue leaves the revenue subtotal at nil and
 gross margin uncomputable. A P&L with no costs makes gross profit and EBIT
 simply equal revenue. A KPI with no actual cannot be set against its
-target. A blank line item cannot be named in the commentary. A controller
-wants to be warned, not stopped, so each check appends a human-readable
-warning to the flowing problems list and the records go on to step3
-untouched. Nothing raises, nothing is dropped (the P5 validate pattern:
-warn and carry on).
+target. A blank line item cannot be named in the commentary. The reviewer
+wants to be told, not stopped, so each check appends a data note to the
+flowing problems list and the records go on to step3 untouched. Nothing
+raises, nothing is dropped (the P5 validate pattern: note and carry on).
 
 Works on the lists step1 returned and the problems list it started. No
-Pack exists yet; step4 attaches the combined list to Pack.warnings.
+Pack exists yet; step4 attaches the combined list to Pack.warnings, which
+holds the data notes.
 
 Each check is small and named so a test can target it. Each returns the
-warnings it raises, so an empty list means the check passed.
+data notes it writes, so an empty list means the check passed.
 """
 
 from __future__ import annotations
@@ -60,10 +60,10 @@ def line_items_present(pnl_lines: list[PnlLine]) -> list[str]:
     Warn once per category on the lines whose source line_item was blank.
 
     On the CSV path step1 has already labelled such a line and set
-    line_item_blank, so the flag is checked as well as the text. The line
+    line_item_blank, so that field is checked as well as the text. The line
     is kept: its amounts still belong in the subtotals, it just has no real
     name for the commentary. The note gives the label the pack shows it
-    under, so the preparer can find it in the table.
+    under, so whoever prepared the file can find it in the table.
     """
     labels: dict[str, list[str]] = {}
     for line in pnl_lines:
@@ -101,10 +101,10 @@ def line_names_unique(pnl_lines: list[PnlLine]) -> list[str]:
 
 def line_names_not_subtotals(pnl_lines: list[PnlLine]) -> list[str]:
     """
-    Warn on a line named like a subtotal (Revenue, COGS, Gross profit, Opex,
-    EBIT). A single revenue line called "Revenue" is realistic for a small
-    company; the code keeps it apart from the Revenue subtotal, but the
-    table would show two rows labelled Revenue.
+    Note a line named like a subtotal ("Revenue", "COGS", "Gross profit",
+    "Opex", "EBIT"). A single revenue line called "Revenue" is realistic for a
+    small company; the code keeps it apart from the revenue subtotal, but the
+    table would show two rows labelled "Revenue".
     """
     subtotal_names = {_name_key(name): name for _, name in SUBTOTALS}
     return [
@@ -120,7 +120,7 @@ def has_revenue(pnl_lines: list[PnlLine]) -> list[str]:
     Warn if the P&L has no revenue line.
 
     Without revenue the pack would report a nil top line and a gross margin
-    with nothing to divide by. Nonsensical, but the controller decides
+    with nothing to divide by. Nonsensical, but the reviewer decides
     whether to proceed, so this warns rather than blocks.
     """
     if any(line.category is Category.REVENUE for line in pnl_lines):
@@ -144,7 +144,7 @@ def names_not_too_long(pnl_lines: list[PnlLine], kpis: list[Kpi]) -> list[str]:
     """
     Warn on a line or KPI name longer than 60 characters. It is kept, and the
     PDF wraps it inside its column rather than widening the table, but a
-    board reads short labels faster, so the preparer may want to shorten it.
+    board reads short labels faster, so whoever prepared the file may want to shorten it.
     """
     warnings = [notes.long_name(notes.PNL, line.line_item)
                 for line in pnl_lines if len(line.line_item or "") > MAX_NAME_LENGTH]
@@ -175,10 +175,10 @@ def validate(
     problems: list[str],
 ) -> list[str]:
     """
-    Run every check, append its warnings to problems, and return it.
+    Run every check, append its data notes to problems, and return it.
 
     The same list object comes back with step1's notes first and step2's
-    warnings after, so it reads in the order the pipeline ran. The records
+    after, so it reads in the order the pipeline ran. The records
     are inspected only: no value is changed, no record is removed, and
     nothing raises.
     """
