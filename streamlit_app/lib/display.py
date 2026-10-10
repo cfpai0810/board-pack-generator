@@ -39,13 +39,14 @@ def tiles_html(tiles: list[Tile]) -> str:
 
 def chart_html(chart: ScreenChart, *, title: bool = True) -> str:
     """
-    A chart the PDF draws, as its SVG, no wider than half as large again as
-    it prints, so its labels read at the PDF's proportions; its caption beneath.
+    A chart the PDF draws, as its SVG, between a quarter and a half as large
+    again as it prints, so its labels stay readable: on a phone a wide chart
+    scrolls sideways in its own box, as the tables do. Its caption beneath.
     """
     heading = f'<p class="bp-chart-title">{_E(chart.title)}</p>' if title else ""
     caption = f'<p class="bp-note">{_E(chart.caption)}</p>' if chart.caption else ""
     return (f'{heading}<div class="bp-chart" style="max-width:{chart.width * 3 // 2}px">'
-            f"{chart.svg}</div>{caption}")
+            f'<div style="min-width:{chart.width * 5 // 4}px">{chart.svg}</div></div>{caption}')
 
 
 def commentary_html(text: str) -> str:

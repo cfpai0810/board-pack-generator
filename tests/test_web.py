@@ -166,6 +166,10 @@ class TestSampleRun:
                   "Cash balance"]
         positions = [md.index(f"<title>{title}</title>") for title in titles]
         assert positions == sorted(positions) and md.count("<svg") == 3
+        assert "\n" not in md[md.index("<svg"):md.rindex("</svg>")]    # never a code block
+        ids = re.findall(r'(?<![\w-])id="([^"]+)"', md)
+        assert len(ids) == len(set(ids))      # no chart takes another's clip path
+        assert set(re.findall(r"url\(#([^)]+)\)", md)) <= set(ids)
         assert md.index("<title>The budget-to-actual bridge") < md.index("Main drivers of the")
         assert md.index("Revenue was £112k (4.3%) below budget, with all three") < positions[1]
 

@@ -441,15 +441,20 @@ class ScreenChart:
 _SVG_FONT = "Helvetica, Arial, sans-serif"
 
 
-def _svg(drawing: Drawing, title: str) -> str:
+def _svg(drawing: Drawing, title: str, name: str) -> str:
     """
     The drawing as inline SVG that scales to its column: the XML preamble
-    dropped, the width made relative (the viewBox keeps the proportions), the
-    PDF's font names given browser fallbacks, and the chart titled for a
-    screen reader.
+    dropped, the whole on one line (an indented line inside Markdown would
+    read as a code block), its ids prefixed with name (reportlab names every
+    clip path "clip", and on one page each chart would take the first one's),
+    the width made relative (the viewBox keeps the proportions), the PDF's
+    font names given browser fallbacks, and the chart titled for a screen
+    reader.
     """
     text = renderSVG.drawToString(drawing)
-    text = text[text.index("<svg"):]
+    text = re.sub(r"\s*\n\s*", " ", text[text.index("<svg"):]).strip()
+    text = re.sub(r'id="([^"]+)"', rf'id="{name}-\1"', text)
+    text = re.sub(r"url\(#([^)]+)\)", rf"url(#{name}-\1)", text)
     text = re.sub(r'<svg width="[^"]*" height="[^"]*"', '<svg width="100%"', text, count=1)
     text = text.replace("<title>...</title>", f"<title>{escape(title)}</title>")
     text = text.replace("<desc>...</desc>", "")
@@ -467,7 +472,7 @@ def screen_charts(pack: Pack) -> dict[str, ScreenChart]:
               "effects": (EFFECTS_TITLE, _effects(pack), EFFECTS_CAPTION)}
     if pack.section(SectionType.CASH).figures["supplied"]:
         charts["cash"] = ("Cash balance", _cash(pack), "")
-    return {key: ScreenChart(title, _svg(drawing, title), caption, _pt(drawing.width))
+    return {key: ScreenChart(title, _svg(drawing, title, f"bp-{key}"), caption, _pt(drawing.width))
             for key, (title, drawing, caption) in charts.items()}
 
 

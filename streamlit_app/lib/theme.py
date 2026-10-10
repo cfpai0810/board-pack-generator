@@ -110,7 +110,7 @@ def inject_css() -> str:
       [data-testid="stMarkdownContainer"] p.bp-message {{
         font-size: 0.95rem; font-weight: 600; color: {INK}; margin: 2px 0 8px;
       }}
-      .bp-chart {{ margin: 2px 0 4px; }}
+      .bp-chart {{ margin: 2px 0 4px; overflow-x: auto; }}
       .bp-chart svg {{ display: block; height: auto; }}
 
       /* Tables in the PDF's conventions */
