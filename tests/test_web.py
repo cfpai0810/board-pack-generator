@@ -936,9 +936,10 @@ class TestWorkedExampleTab:
         manifest = json.loads((ROOT / "generated" / "worked_example" / "pages.json")
                               .read_text(encoding="utf-8"))
         images = at.tabs[0].get("image")
-        assert len(images) == len(manifest["pages"]) == 2
+        n = len(manifest["pages"])
+        assert len(images) == n >= 2
         shown = [img.proto.imgs[0].caption for img in images]
-        assert shown == ["Page 1 of 2", "Page 2 of 2"]
+        assert shown == [f"Page {i} of {n}" for i in range(1, n + 1)]
 
     def test_the_downloads_are_the_committed_files(self):
         at = _app(BOARD).run()

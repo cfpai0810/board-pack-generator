@@ -1,9 +1,10 @@
 {
   "pdf_name": "harmwell_foods_2026_06_board_pack_FINAL.pdf",
-  "pdf_sha256": "888a0da231cb3d73e97724d380a29bac4c922afc9ecc5ccce686a590cc4bdcd9",
+  "pdf_sha256": "394bb87e8d82335e8b81ed6ed5fd256c8912194d96e1cea70c4030407e2a1c1c",
   "pages": [
     "page_1.png",
-    "page_2.png"
+    "page_2.png",
+    "page_3.png"
   ],
   "scale": 1.6
 }

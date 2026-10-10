@@ -33,6 +33,7 @@ import hashlib
 import io
 import re
 from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Optional
 from xml.sax.saxutils import escape
@@ -41,11 +42,12 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
+from reportlab.graphics.shapes import Drawing, Line, Rect, String
 from reportlab.lib.units import cm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
-    KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table,
+    HRFlowable, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table,
     TableStyle,
 )
 
@@ -53,11 +55,15 @@ from src.formatting import (
     cash_pounds, margin_cell, pct, pts_cell, table_number, table_value, when_text,
 )
 from src.state import Pack, PackStatus, SectionType
+from src.story import (
+    ebit_walk, headline_sentence, line_effects, pnl_message, signed_money, standfirst,
+)
 from src.step5_narrate import TEMPLATE, clean_dashes
 from src.step6_review import _utc_now, excluded_rows_note, signoff_summary, write_audit
 from src.tables import (
     DRAFT_HEX, DRIVERS_HEADER, DRIVERS_NOTE, FINAL_HEX, KPI_NOTE, LINE, cash_note,
-    MATERIAL_HEX, PNL_HEADER, RULE_HEX, SUBTOTAL, drivers_rows, pnl_notes, pnl_rows,
+    MATERIAL_HEX, PNL_HEADER, RULE_HEX, SUBTOTAL, drivers_rows, headline_tiles, pnl_notes,
+    pnl_rows,
 )
 
 # -- Look: colour only for status and materiality -----------------------------
@@ -67,20 +73,50 @@ FINAL_FILL = colors.HexColor(FINAL_HEX)
 MATERIAL_FILL = colors.HexColor(MATERIAL_HEX)
 WATERMARK = colors.Color(0.87, 0.87, 0.87)
 RULE = colors.HexColor(RULE_HEX)
+INK = colors.HexColor("#1A1F23")          # body text: near black, prints as black
+GREY = colors.HexColor("#5A646D")         # secondary text: units, notes, labels
+HAIRLINE = colors.HexColor("#C9CED2")     # light rules between rows and around the page
+PANEL = colors.HexColor("#F2F3F4")        # the headline tiles and the governance panel
 
 MARGIN = 1.8 * cm
 PAGE_W, PAGE_H = A4
 BODY_W = PAGE_W - 2 * MARGIN
+# The frame indents its contents by 6 points; a table BODY_W wide is centred
+# over it, so its fills bleed 6 points either side while its text (6 points
+# of cell padding) lines up with the paragraphs. TEXT_W is that text width.
+FRAME_PAD = 6
+TEXT_W = BODY_W - 2 * FRAME_PAD
 
-_BASE = ParagraphStyle("base", fontName="Helvetica", fontSize=9.5, leading=13)
-_SMALL = ParagraphStyle("small", parent=_BASE, fontSize=7.5, leading=10)
-_H1 = ParagraphStyle("h1", parent=_BASE, fontName="Helvetica-Bold", fontSize=16, leading=20)
-_H2 = ParagraphStyle("h2", parent=_BASE, fontName="Helvetica-Bold", fontSize=11.5,
-                     leading=15, spaceBefore=10, spaceAfter=4)
+_BASE = ParagraphStyle("base", fontName="Helvetica", fontSize=9.5, leading=13.5,
+                       textColor=INK)
+_SMALL = ParagraphStyle("small", parent=_BASE, fontSize=7.5, leading=10, textColor=GREY)
+_NOTE = ParagraphStyle("note", parent=_SMALL, spaceBefore=2)
+_H1 = ParagraphStyle("h1", parent=_BASE, fontName="Helvetica-Bold", fontSize=18, leading=22)
+_SUBTITLE = ParagraphStyle("subtitle", parent=_BASE, fontSize=10.5, leading=14, textColor=GREY)
+_H2 = ParagraphStyle("h2", parent=_BASE, fontName="Helvetica-Bold", fontSize=12.5,
+                     leading=16, spaceBefore=14, spaceAfter=0, keepWithNext=1)
 _H3 = ParagraphStyle("h3", parent=_BASE, fontName="Helvetica-Bold", fontSize=9.5,
-                     leading=13, spaceBefore=8, spaceAfter=3)
-_BANNER = ParagraphStyle("banner", parent=_BASE, fontName="Helvetica-Bold", fontSize=11,
-                         textColor=colors.white, alignment=TA_CENTER)
+                     leading=13, spaceBefore=10, spaceAfter=4, keepWithNext=1)
+_BANNER = ParagraphStyle("banner", parent=_BASE, fontName="Helvetica-Bold", fontSize=10.5,
+                         leading=13, textColor=colors.white, alignment=TA_CENTER)
+_TILE_LABEL = ParagraphStyle("tile_label", parent=_BASE, fontSize=7.5, leading=9,
+                             textColor=GREY)
+_TILE_VALUE = ParagraphStyle("tile_value", parent=_BASE, fontName="Helvetica-Bold",
+                             fontSize=15, leading=19)
+_TILE_VERSUS = ParagraphStyle("tile_versus", parent=_BASE, fontSize=7.5, leading=9,
+                              textColor=GREY)
+_PANEL_TEXT = ParagraphStyle("panel", parent=_BASE, fontSize=8.5, leading=12)
+_HEADLINE = ParagraphStyle("headline", parent=_BASE, fontName="Helvetica-Bold", fontSize=14,
+                           leading=18, spaceAfter=3)
+_STANDFIRST = ParagraphStyle("standfirst", parent=_BASE, fontSize=10, leading=14,
+                             textColor=GREY, spaceAfter=10)
+_MESSAGE = ParagraphStyle("message", parent=_BASE, fontName="Helvetica-Bold", fontSize=10,
+                          leading=14, spaceAfter=8)
+_CAPTION = ParagraphStyle("caption", parent=_SMALL, spaceBefore=3, spaceAfter=10)
+BAR_STEP = colors.HexColor("#8C959C")     # a step in the bridge
+BAR_LIGHT = colors.HexColor("#C3C9CE")    # a line that is not material
+_LIST = ParagraphStyle("list", parent=_BASE, leftIndent=14, firstLineIndent=-14,
+                       spaceAfter=3)
 
 _LEGAL_SUFFIXES = {"ltd", "limited", "plc", "llp", "inc", "llc"}
 
@@ -120,6 +156,32 @@ def _label(text: str, width: float, bold: bool = False):
     return Paragraph(escape(text), _CELL_BOLD if bold else _CELL)
 
 
+def _heading(text: str) -> list:
+    """A section heading with a rule beneath it, kept with what follows."""
+    rule = HRFlowable(width="100%", thickness=0.7, color=INK, spaceBefore=2, spaceAfter=7)
+    rule.keepWithNext = 1
+    return [_para(text, _H2), rule]
+
+
+def _table_style(header_rows: int, units_row: bool) -> list:
+    """Bold header, a grey units row if there is one, a rule under the header, even padding."""
+    style = [
+        ("FONT", (0, 0), (-1, -1), "Helvetica", 8),
+        ("TEXTCOLOR", (0, 0), (-1, -1), INK),
+        ("FONT", (0, 0), (-1, header_rows - 1), "Helvetica-Bold", 8),
+        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ("LINEBELOW", (0, header_rows - 1), (-1, header_rows - 1), 0.7, INK),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]
+    if units_row:
+        last = header_rows - 1
+        style += [("FONT", (0, last), (-1, last), "Helvetica", 7),
+                  ("TEXTCOLOR", (0, last), (-1, last), GREY),
+                  ("TOPPADDING", (0, last), (-1, last), 0)]
+    return style
+
+
 # -- The P&L table ------------------------------------------------------------
 
 def _pnl_table(pack: Pack) -> Table:
@@ -132,15 +194,12 @@ def _pnl_table(pack: Pack) -> Table:
              for row in rows]
 
     num_w = (BODY_W - label_w) / 7
-    style = [
-        ("FONT", (0, 0), (-1, -1), "Helvetica", 8),
-        ("FONT", (0, 0), (-1, 1), "Helvetica-Bold", 8),
+    style = _table_style(header_rows=2, units_row=True) + [
         ("SPAN", (4, 0), (5, 0)), ("SPAN", (6, 0), (7, 0)),
-        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
         ("ALIGN", (4, 0), (7, 0), "CENTER"),
-        ("LINEBELOW", (0, 1), (-1, 1), 0.6, RULE),
-        ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        # each Fav/(Adv) group is underlined, so its two columns read as one
+        ("LINEBELOW", (4, 0), (5, 0), 0.4, HAIRLINE),
+        ("LINEBELOW", (6, 0), (7, 0), 0.4, HAIRLINE),
     ]
     # Bold means subtotal, always, with a rule above. Materiality is shown only
     # by the fill and the asterisk, so a material line never looks like a total.
@@ -148,12 +207,13 @@ def _pnl_table(pack: Pack) -> Table:
         if row.kind == LINE:
             style.append(("LEFTPADDING", (0, i), (0, i), 12))
         else:
-            style.append(("LINEABOVE", (0, i), (-1, i), 0.4, RULE))
+            style.append(("LINEABOVE", (0, i), (-1, i), 0.5, RULE))
         if row.kind == SUBTOTAL:
             style.append(("FONT", (0, i), (-1, i), "Helvetica-Bold", 8))
         if row.material:
             style.append(("BACKGROUND", (0, i), (-1, i), MATERIAL_FILL))
-    style.append(("LINEBELOW", (0, len(data) - 2), (-1, len(data) - 2), 0.8, RULE))
+    style.append(("LINEBELOW", (0, len(data) - 2), (-1, len(data) - 2), 1.0, INK))
+    style.append(("TEXTCOLOR", (0, len(data) - 1), (-1, len(data) - 1), GREY))
     table = Table(data, colWidths=[label_w] + [num_w] * 7, repeatRows=2)
     table.setStyle(TableStyle(style))
     return table
@@ -161,7 +221,7 @@ def _pnl_table(pack: Pack) -> Table:
 
 # -- KPI and cash tables ------------------------------------------------------
 
-def _drivers_block(pack: Pack) -> list:
+def _drivers_block(pack: Pack, width=None) -> list:
     """
     "Main drivers of the variance against budget": for Gross profit and
     EBIT when material, each driver line with its impact on profit in
@@ -173,23 +233,215 @@ def _drivers_block(pack: Pack) -> list:
     driver_rows = drivers_rows(pack)
     if not driver_rows:
         return []
+    width = width or 13.2 * cm
+    line_w = width - 4.5 * cm
     rows = [list(DRIVERS_HEADER[0]), list(DRIVERS_HEADER[1])]
-    rows += [[r.subtotal, _label(r.line, 4.6 * cm - 12), r.impact] for r in driver_rows]
-    table = Table(rows, colWidths=[3.6 * cm, 4.6 * cm, 3.4 * cm], hAlign="LEFT")
-    table.setStyle(TableStyle([
-        ("FONT", (0, 0), (-1, -1), "Helvetica", 8),
-        ("FONT", (0, 0), (-1, 1), "Helvetica-Bold", 8),
-        ("ALIGN", (2, 0), (2, -1), "RIGHT"),
-        ("LINEBELOW", (0, 1), (-1, 1), 0.6, RULE),
-        ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]))
-    return [KeepTogether([
+    rows += [[r.subtotal, _label(r.line, line_w - 12), r.impact] for r in driver_rows]
+    widths = [2.3 * cm, line_w, 2.2 * cm]
+    style = _table_style(header_rows=2, units_row=True) + [
+        ("LEFTPADDING", (0, 0), (0, -1), 0),          # on the paragraph edge
+        ("RIGHTPADDING", (-1, 0), (-1, -1), 0),
+        ("ALIGN", (1, 0), (1, -1), "LEFT"),           # names read from the left
+        ("FONT", (0, 2), (0, -1), "Helvetica-Bold", 8),
+    ]
+    # a hairline between one subtotal's drivers and the next
+    for i, r in enumerate(driver_rows, start=2):
+        if r.subtotal and i > 2:
+            style.append(("LINEABOVE", (0, i), (-1, i), 0.4, HAIRLINE))
+    table = Table(rows, colWidths=widths, hAlign="LEFT")
+    table.setStyle(TableStyle(style))
+    return [
         _para("Main drivers of the variance against budget", _H3),
         table,
-        Spacer(1, 3),
+        Spacer(1, 4),
         _para(DRIVERS_NOTE, _SMALL),
-    ])]
+    ]
+
+
+_D0 = Decimal("0")
+
+
+def _fit(text: str, width, size) -> str:
+    """Text cut at a word, with an ellipsis, so it fits width at this size."""
+    text = _safe(text)
+    if stringWidth(text, "Helvetica", size) <= width:
+        return text
+    words = text.split()
+    while words and stringWidth(" ".join(words) + "...", "Helvetica", size) > width:
+        words.pop()
+    return (" ".join(words) or text[:8]) + "..."
+
+
+def _pt(value) -> int:
+    """A chart coordinate in whole points: computed in Decimal, handed to reportlab as an int."""
+    return int(Decimal(value).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+
+
+def _walk_chart(pack: Pack, width: Decimal, height: Decimal) -> Drawing:
+    """
+    The bridge from budget EBIT to actual EBIT: the two totals as solid
+    bars, the effect of revenue, COGS and opex as floating steps between
+    them, joined at each running level. Every label is a figure of the pack.
+    """
+    bars, running = [], _D0
+    for step in ebit_walk(pack):
+        if step.kind == "total":
+            low, high = sorted((_D0, step.value))
+            running = step.value
+        else:
+            start, running = running, running + step.value
+            low, high = sorted((start, running))
+        bars.append((step, low, high, running))
+    lowest = min([_D0] + [b[1] for b in bars])
+    highest = max([_D0] + [b[2] for b in bars])
+    span = (highest - lowest) or Decimal(1)
+    top, bottom = Decimal(14), Decimal(28)
+    plot = height - top - bottom
+
+    def y(value):
+        return bottom + (value - lowest) * plot / span
+
+    slot = width / len(bars)
+    bar_w = slot * Decimal("0.56")
+    drawing = Drawing(_pt(width), _pt(height))
+    drawing.add(Line(0, _pt(y(_D0)), _pt(width), _pt(y(_D0)), strokeColor=HAIRLINE,
+                     strokeWidth=0.7))
+    for i, (step, low, high, level) in enumerate(bars):
+        x = slot * i + (slot - bar_w) / 2
+        drawing.add(Rect(_pt(x), _pt(y(low)), _pt(x + bar_w) - _pt(x),
+                         max(_pt(y(high)) - _pt(y(low)), 1),
+                         fillColor=INK if step.kind == "total" else BAR_STEP,
+                         strokeColor=None))
+        rises = step.value >= 0
+        drawing.add(String(_pt(x + bar_w / 2), _pt(y(high)) + 4 if rises else _pt(y(low)) - 10,
+                           signed_money(step.value), fontName="Helvetica-Bold",
+                           fontSize=7.5, fillColor=INK, textAnchor="middle"))
+        if i < len(bars) - 1:
+            drawing.add(Line(_pt(x + bar_w), _pt(y(level)), _pt(x + slot), _pt(y(level)),
+                             strokeColor=GREY, strokeWidth=0.5, strokeDashArray=[2, 2]))
+        drawing.add(String(_pt(x + bar_w / 2), 6, step.label, fontName="Helvetica",
+                           fontSize=7, fillColor=GREY, textAnchor="middle"))
+    return drawing
+
+
+def _effects_chart(pack: Pack, width: Decimal) -> Drawing:
+    """
+    Each line's effect on profit against budget, largest first, as bars
+    either side of zero: left lowered profit, right raised it. Material
+    lines are dark and marked *, as in the P&L table.
+    """
+    effects = line_effects(pack)
+    row, pad = Decimal(13), Decimal(3)
+    height = row * len(effects) + 2 * pad
+    name_w, part_w, value_w = Decimal(112), Decimal(34), Decimal(46)
+    below = max([-e.effect for e in effects if e.effect < 0] + [_D0])
+    above = max([e.effect for e in effects if e.effect > 0] + [_D0])
+    span = (below + above) or Decimal(1)
+    area = width - name_w - part_w - 2 * value_w
+    zero = name_w + part_w + value_w + area * below / span
+    drawing = Drawing(_pt(width), _pt(height))
+    drawing.add(Line(_pt(zero), 0, _pt(zero), _pt(height), strokeColor=HAIRLINE,
+                     strokeWidth=0.7))
+    for i, effect in enumerate(effects):
+        middle = height - pad - row * i - row / 2
+        text_y = _pt(middle) - 3
+        name = f"{effect.name} *" if effect.material else effect.name
+        drawing.add(String(0, text_y, _fit(name, name_w - 6, 7.5), fontName="Helvetica",
+                           fontSize=7.5, fillColor=INK))
+        # which step of the bridge on page 1 the line belongs to
+        drawing.add(String(_pt(name_w), text_y, effect.part, fontName="Helvetica",
+                           fontSize=6.5, fillColor=GREY))
+        length = area * effect.effect.copy_abs() / span
+        x = zero - length if effect.effect < 0 else zero
+        # both edges rounded, so every bar meets the zero line exactly
+        left, right = _pt(x), _pt(x + length)
+        drawing.add(Rect(left, _pt(middle) - 4, max(right - left, 1), 8, strokeColor=None,
+                         fillColor=INK if effect.material else BAR_LIGHT))
+        label = signed_money(effect.effect)
+        if effect.effect < 0:
+            drawing.add(String(_pt(x) - 3, text_y, label, fontName="Helvetica", fontSize=7,
+                               fillColor=GREY, textAnchor="end"))
+        else:
+            drawing.add(String(_pt(x + length) + 3, text_y, label, fontName="Helvetica",
+                               fontSize=7, fillColor=GREY))
+    return drawing
+
+
+def _cash_chart(figures: dict, scale, width: Decimal) -> Drawing:
+    """
+    The cash balance against target and last year, as three bars from zero:
+    the actual dark, the comparators light, each labelled in the prose scale.
+    """
+    bars = [(name, cash_pounds(figures[key], scale)) for name, key in
+            (("Actual", "actual"), ("Target", "target"), ("Prior year", "prior_year"))
+            if figures[key] is not None]
+    row, pad, name_w, value_w = Decimal(15), Decimal(2), Decimal(70), Decimal(50)
+    height = row * len(bars) + 2 * pad
+    below = max([-v for _, v in bars if v < 0] + [_D0])
+    above = max([v for _, v in bars if v > 0] + [_D0])
+    span = (below + above) or Decimal(1)
+    area = width - name_w - value_w - (value_w if below else _D0)
+    zero = name_w + (value_w if below else _D0) + area * below / span
+    drawing = Drawing(_pt(width), _pt(height))
+    drawing.add(Line(_pt(zero), 0, _pt(zero), _pt(height), strokeColor=HAIRLINE,
+                     strokeWidth=0.7))
+    for i, (name, value) in enumerate(bars):
+        middle = height - pad - row * i - row / 2
+        text_y = _pt(middle) - 3
+        drawing.add(String(0, text_y, name, fontName="Helvetica", fontSize=7.5, fillColor=INK))
+        length = area * value.copy_abs() / span
+        x = zero - length if value < 0 else zero
+        left, right = _pt(x), _pt(x + length)
+        drawing.add(Rect(left, _pt(middle) - 5, max(right - left, 1), 10, strokeColor=None,
+                         fillColor=INK if i == 0 else BAR_LIGHT))
+        label = signed_money(value)
+        if value < 0:
+            drawing.add(String(_pt(x) - 3, text_y, label, fontName="Helvetica", fontSize=7,
+                               fillColor=GREY, textAnchor="end"))
+        else:
+            drawing.add(String(_pt(x + length) + 3, text_y, label, fontName="Helvetica",
+                               fontSize=7, fillColor=GREY))
+    return drawing
+
+
+def _evidence(pack: Pack) -> list:
+    """
+    The summary's evidence, side by side: the bridge from budget to actual
+    EBIT (by revenue, COGS and opex) and the drivers table (by line). With
+    no material profit subtotal there are no drivers, and the bridge stands
+    alone.
+    """
+    chart_w = 8.3 * cm
+    walk = [_para("From budget to actual EBIT", _H3),
+            _walk_chart(pack, Decimal(str(chart_w - 12)), Decimal(170)),
+            _para("Each step is that part of the P&L against budget, as its effect on profit: "
+                  "revenue below budget, or a cost above it, lowers profit.", _CAPTION)]
+    drivers = _drivers_block(pack, BODY_W - chart_w - 24)
+    if not drivers:
+        return [KeepTogether(walk)]
+    row = Table([[walk, drivers]], colWidths=[chart_w, BODY_W - chart_w])
+    row.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (1, 0), (1, 0), 18), ("RIGHTPADDING", (1, 0), (1, 0), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    return [Spacer(1, 4), row]
+
+
+def _tiles(pack: Pack) -> Table:
+    """Revenue, gross profit, gross margin and EBIT at a glance, from the P&L table's own figures."""
+    tiles = headline_tiles(pack)
+    cells = [[[_para(t.label, _TILE_LABEL), _para(t.value, _TILE_VALUE),
+               _para(t.budget, _TILE_VERSUS), _para(t.last_year, _TILE_VERSUS)] for t in tiles]]
+    table = Table(cells, colWidths=[BODY_W / len(tiles)] * len(tiles))
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), PANEL),
+        ("LINEAFTER", (0, 0), (-2, -1), 4, colors.white),     # a gap between the tiles
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+    ]))
+    return table
 
 
 def _kpi_table(pack: Pack) -> Table:
@@ -225,23 +477,21 @@ _LABEL_W = 5.0 * cm
 def _simple_table(rows, header_rows: int = 1) -> Table:
     num_w = (BODY_W - _LABEL_W) / (len(rows[0]) - 1)
     table = Table(rows, colWidths=[_LABEL_W] + [num_w] * (len(rows[0]) - 1))
-    table.setStyle(TableStyle([
-        ("FONT", (0, 0), (-1, -1), "Helvetica", 8),
-        ("FONT", (0, 0), (-1, header_rows - 1), "Helvetica-Bold", 8),
-        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
-        ("LINEBELOW", (0, header_rows - 1), (-1, header_rows - 1), 0.6, RULE),
-        ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]))
+    style = _table_style(header_rows, units_row=header_rows > 1)
+    style += [("LINEBELOW", (0, i), (-1, i), 0.4, HAIRLINE)
+              for i in range(header_rows, len(rows) - 1)]
+    style.append(("LINEBELOW", (0, len(rows) - 1), (-1, len(rows) - 1), 0.7, INK))
+    table.setStyle(TableStyle(style))
     return table
 
 
 def _boxed(text: str) -> Table:
-    box = Table([[_para(text, ParagraphStyle("notice", parent=_BASE, fontName="Helvetica-Bold"))]],
+    box = Table([[_para(text, ParagraphStyle("notice", parent=_BASE, fontName="Helvetica-Bold",
+                                             fontSize=9))]],
                 colWidths=[BODY_W])
     box.setStyle(TableStyle([
-        ("BOX", (0, 0), (-1, -1), 1.2, colors.black),
-        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("BOX", (0, 0), (-1, -1), 1.2, INK),
+        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
     ]))
     return box
 
@@ -258,7 +508,7 @@ def _banner(pack: Pack) -> Table:
     banner = Table([[_para(text, _BANNER)]], colWidths=[BODY_W])
     banner.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), fill),
-        ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
     ]))
     return banner
 
@@ -294,7 +544,20 @@ def _governance(pack: Pack) -> list:
     ]
     if pack.run_id:
         lines.append(f"Review run: {pack.run_id}.")
-    return [_para(line) for line in lines]
+    paras = []
+    for line in lines:
+        label, colon, rest = line.partition(": ")
+        if colon and len(label) < 45:
+            paras.append(Paragraph(f"<b>{escape(_safe(label))}:</b> {escape(_safe(rest))}",
+                                   _PANEL_TEXT))
+        else:
+            paras.append(_para(line, _PANEL_TEXT))
+    panel = Table([[paras]], colWidths=[BODY_W])
+    panel.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), PANEL),
+        ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    return [panel]
 
 
 def _story(pack: Pack) -> list:
@@ -305,57 +568,74 @@ def _story(pack: Pack) -> list:
 
     story = [
         _para(pack.entity, _H1),
-        _para(f"Monthly management pack, {pack.period}"),
-        Spacer(1, 8),
+        _para(f"Monthly management pack, {pack.period}", _SUBTITLE),
+        Spacer(1, 10),
         _banner(pack),
-        Spacer(1, 6),
-        _para("Executive summary", _H2),
+        Spacer(1, 2),
+        # 1. The message, the numbers, the words, the evidence
+        KeepTogether([*_heading("Executive summary"), _para(headline_sentence(pack), _HEADLINE),
+                      _para(standfirst(pack), _STANDFIRST),
+                      # the headline's totals carry the same warning as the P&L table
+                      *([_boxed(excluded_rows_note(pack)), Spacer(1, 8)]
+                        if pack.excluded_pnl_rows else []),
+                      _tiles(pack)]),
+        _para("Commentary", _H3),
         _para(pack.section(SectionType.EXEC_SUMMARY).narrative),
-        *_drivers_block(pack),
-        _para("Profit and loss", _H2),
-    ]
-    if pack.excluded_pnl_rows:
-        story += [_boxed(excluded_rows_note(pack)), Spacer(1, 6)]
-    story += [
-        _pnl_table(pack),
-        _para("Commentary on material lines", _H3),
-        _para(pnl.narrative),
-        Spacer(1, 6),
-        *[_para(note, _SMALL) for note in pnl_notes(pack)],
-        # Each heading stays on the same page as its table: a header row
-        # stranded at the foot of a page reads as a table with no data.
+        *_evidence(pack),
+        # 2. The measures beyond the P&L
         KeepTogether([
-            _para("Key performance indicators", _H2),
+            *_heading("Key performance indicators"),
             _kpi_table(pack),
             Spacer(1, 4),
             _para(KPI_NOTE, _SMALL),
         ]),
-        Spacer(1, 6),
+        Spacer(1, 8),
         _para(kpis.narrative),
     ]
+    # 3. The P&L, read as one statement: its message, each line's effect on
+    # profit, then the table. If it does not fit, it starts the next page whole.
+    statement = [*_heading("Profit and loss"), _para(pnl_message(pack), _MESSAGE)]
+    if pack.excluded_pnl_rows:
+        statement += [_boxed(excluded_rows_note(pack)), Spacer(1, 8)]
+    statement += [_para("Each line's effect on profit against budget", _H3),
+                  _effects_chart(pack, Decimal(str(TEXT_W))),
+                  _para("Largest first, each with its part of the P&L: to the left of the line "
+                        "lowered profit, to the right raised it. Material lines are dark and "
+                        "marked *.", _CAPTION)]
+    story += [
+        KeepTogether([*statement, _pnl_table(pack)]),
+        _para("Commentary on material lines", _H3),
+        _para(pnl.narrative),
+        Spacer(1, 6),
+        *[_para(note, _NOTE) for note in pnl_notes(pack)],
+    ]
+    # 4. Cash
     if cash.figures["supplied"]:
         story += [
             KeepTogether([
-                _para("Cash", _H2),
+                *_heading("Cash"),
+                _cash_chart(cash.figures, pack.cash_scale, Decimal(str(TEXT_W * 0.6))),
+                Spacer(1, 8),
                 _cash_table(cash.figures, pack.cash_scale),
                 Spacer(1, 4),
                 _para(cash_note(pack), _SMALL),
             ]),
-            Spacer(1, 6),
+            Spacer(1, 8),
             _para(cash.narrative),
         ]
     else:
-        story += [_para("Cash", _H2), _para(cash.figures["note"])]
+        story += [*_heading("Cash"), _para(cash.figures["note"])]
         if cash.narrative != cash.figures["note"]:
             story.append(_para(cash.narrative))
-    story += [KeepTogether([_para("Governance and sign-off", _H2), *_governance(pack)])]
+    story += [KeepTogether([*_heading("Governance and sign-off"), *_governance(pack)])]
 
     if pack.status is not PackStatus.FINAL:
         notes = signoff_summary(pack)
-        story += [PageBreak(), _para("Review notes", _H2),
+        story += [PageBreak(), *_heading("Review notes"),
                   _para("Outstanding when this draft was rendered. The pack is a draft "
-                        "until these are reviewed and it is signed off.")]
-        story += ([_para(f"{i}. {note}") for i, note in enumerate(notes, start=1)]
+                        "until these are reviewed and it is signed off."),
+                  Spacer(1, 6)]
+        story += ([_para(f"{i}. {note}", _LIST) for i, note in enumerate(notes, start=1)]
                   or [_para("No outstanding flags or warnings.")])
     return story
 
@@ -373,7 +653,18 @@ def _page_decorator(pack: Pack, generated: str):
             canvas.drawCentredString(0, -38, "DRAFT")
             canvas.rotate(-45)
             canvas.translate(-PAGE_W / 2, -PAGE_H / 2)
-        canvas.setFillColor(colors.black)
+        canvas.setStrokeColor(HAIRLINE)
+        canvas.setLineWidth(0.5)
+        canvas.line(MARGIN, 1.35 * cm, PAGE_W - MARGIN, 1.35 * cm)
+        if doc.page > 1:
+            canvas.line(MARGIN, PAGE_H - 1.25 * cm, PAGE_W - MARGIN, PAGE_H - 1.25 * cm)
+            canvas.setFillColor(GREY)
+            canvas.setFont("Helvetica", 7)
+            canvas.drawString(MARGIN, PAGE_H - 1.1 * cm,
+                              _safe(f"{pack.entity}: monthly management pack, {pack.period}"))
+            canvas.drawRightString(PAGE_W - MARGIN, PAGE_H - 1.1 * cm,
+                                   pack.status.value.upper())
+        canvas.setFillColor(GREY)
         canvas.setFont("Helvetica", 7)
         canvas.drawString(MARGIN, 1.0 * cm,
                           _safe(f"{pack.entity}, {pack.period}. Generated {generated}."))
@@ -402,6 +693,7 @@ class _NumberedCanvas(Canvas):
         for state in self._pages:
             self.__dict__.update(state)
             self.setFont("Helvetica", 7)
+            self.setFillColor(GREY)
             self.drawRightString(PAGE_W - MARGIN, 1.0 * cm, f"Page {self._pageNumber} of {total}")
             super().showPage()
         super().save()

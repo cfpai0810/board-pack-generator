@@ -3263,7 +3263,9 @@ class TestNamedExclusions:
         box = result.data_notes[-1]
         text = _flat(_pdf_pages(result.pdf_path.read_bytes()))
         assert text.index(box) < text.index("Fav/(Adv) vs budget")
-        assert text.count(box) == 2                    # the box, and the review notes
+        # under the headline, above the P&L table, and in the review notes
+        assert text.count(box) == 3
+        assert text.index("EBIT was a loss") < text.index(box) < text.index("Revenue £2.48m")
 
 
 @pytest.fixture(scope="module")
@@ -3486,3 +3488,198 @@ class TestTestCounts:
         assert {conftest.AREA_OF[c] for c in web_classes} == web_areas
         assert counts["by_suite"]["web"] == sum(
             a["tests"] for a in counts["by_area"] if a["area"] in web_areas)
+
+
+# ── THE PACK'S LAYOUT ─────────────────────────────────────────────────
+
+class TestPackLayout:
+    """The layout reads cleanly without changing a word or a figure of the pack."""
+
+    def test_the_headline_tiles_are_the_tables_figures(self, final_pack):
+        from src.tables import headline_tiles, pnl_rows
+        tiles = {t.label: t for t in headline_tiles(final_pack)}
+        rows = {r.label.removesuffix(" *"): r for r in pnl_rows(final_pack)}
+        assert [t.label for t in headline_tiles(final_pack)] == [
+            "Revenue", "Gross profit", "Gross margin", "EBIT"]
+        assert [(t.value, t.budget, t.last_year) for t in tiles.values()] == [
+            ("£2.48m", "£112k (4.3%) below budget", "£128k (5.5%) above last year"),
+            ("£866k", "£147k (14.5%) below budget", "£42k (4.7%) below last year"),
+            ("35.0%", "4.1 pts below budget", "3.7 pts below last year"),
+            ("(£46k)", "£193k below budget", "£147k below last year"),   # n/m across a sign change
+        ]
+        # the same percentages and points the P&L table prints
+        assert f"({tiles['Revenue'].budget.split('(')[1].split(')')[0]})" == rows["Revenue"].cells[4]
+        assert f"({tiles['Gross margin'].budget.split()[0]} pts)" == rows["Gross margin"].cells[4]
+        assert rows["EBIT"].cells[4] == rows["EBIT"].cells[6] == "n/m"
+
+    def test_the_tiles_open_the_executive_summary(self, final_pdf):
+        text = _flat(_pdf_pages(final_pdf))
+        tiles = ("Revenue £2.48m £112k (4.3%) below budget £128k (5.5%) above last year Gross "
+                 "profit £866k £147k (14.5%) below budget £42k (4.7%) below last year Gross margin "
+                 "35.0% 4.1 pts below budget 3.7 pts below last year EBIT (£46k) £193k below "
+                 "budget £147k below last year")
+        assert text.index("Executive summary") < text.index(tiles) < text.index("Revenue was £2.48m")
+
+    def test_the_pnl_is_never_split_across_pages(self, tmp_path):
+        path = tmp_path / "messy_pnl.csv"
+        _write_csv(path, PNL_HEADER, MESSY_ROWS)
+        result = _own_run(tmp_path, pnl=path, kpis=None, entity="Northbridge Ltd",
+                          period="August 2026", cash_scale=1)
+        pages = _pdf_pages(result.pdf_path.read_bytes())
+        (page,) = [p for p in pages if "Retail *" in p and "Fav/(Adv) vs budget" in p]
+        for label in ("These totals exclude", "COGS", "Opex", "EBIT *", "Gross margin"):
+            assert label in page, label
+
+    def test_later_pages_carry_a_running_header(self, final_pdf, draft_pdf):
+        for data, status in ((final_pdf, "FINAL"), (draft_pdf, "DRAFT")):
+            pages = _pdf_pages(data)
+            assert not pages[0].lstrip().startswith("Harmwell Foods Ltd: monthly")
+            for page in pages[1:]:
+                assert "Harmwell Foods Ltd: monthly management pack, June 2026" in page
+                assert status in page
+
+    def test_governance_labels_are_bold_and_the_sentences_unchanged(self, final_pack):
+        from src.step7_render import _governance
+        (panel,) = _governance(final_pack)
+        paras = panel._cellvalues[0][0]
+        assert paras[0].text == "<b>Entity and period:</b> Harmwell Foods Ltd, June 2026."
+        assert paras[1].text == "Figures computed in tested Python from the source files."
+
+
+# ── THE PACK'S STORY ──────────────────────────────────────────────────
+
+def _upside():
+    """A month that beat budget: revenue up, costs down."""
+    from src.step5_narrate import narrate
+    lines = [_pl("Retail", Category.REVENUE, 1900000, 1700000),
+             _pl("Export", Category.REVENUE, 300000, 250000),
+             _pl("Ingredients", Category.COGS, 850000, 905000),
+             _pl("Marketing", Category.OPEX, 230000, 260000)]
+    return narrate(_assemble_lines(lines))
+
+
+class TestStory:
+    """The storyline is computed from the figures, says what moved and by how much, never why."""
+
+    def test_the_headline_and_the_standfirst(self, final_pack):
+        from src.story import headline_sentence, standfirst
+        assert headline_sentence(final_pack) == (
+            "EBIT was a loss of £46k: £193k below budget and £147k below last year.")
+        assert standfirst(final_pack) == (
+            "Against budget, revenue was £112k lower, COGS £34k higher and opex £47k higher; "
+            "the gross margin was 4.1 pts lower. Against last year, revenue grew by £128k "
+            "(5.5%), but the gross margin fell 3.7 pts to 35.0%.")
+        assert headline_sentence(_upside()) == (
+            "EBIT was a profit of £1.12m: £335k above budget and £335k above last year.")
+
+    def test_but_joins_only_a_rise_and_a_fall(self):
+        from src.story import standfirst
+        # revenue down on last year and the margin down: no contrast, so "and"
+        lines = [PnlLine(line_item="Retail", category=Category.REVENUE, actuals=Decimal("900"),
+                         budget=Decimal("1000"), prior_year=Decimal("1000")),
+                 PnlLine(line_item="Ingredients", category=Category.COGS, actuals=Decimal("600"),
+                         budget=Decimal("600"), prior_year=Decimal("500"))]
+        text = standfirst(_assemble_lines(lines))
+        assert text.endswith("Against last year, revenue fell by £100 (10.0%), and the gross "
+                             "margin fell 16.7 pts to 33.3%.")
+        assert "COGS on budget" in text
+
+    def test_the_headline_figures_recomputed_from_the_csv(self, final_pack):
+        # Independent of the engine: sum the sample file's columns directly.
+        from config import PNL_PATH
+        rows = list(csv.DictReader(open(PNL_PATH, encoding="utf-8")))
+        def total(category, column):
+            return sum(Decimal(r[column]) for r in rows if r["category"] == category)
+        def ebit(column):
+            return total("revenue", column) - total("cogs", column) - total("opex", column)
+        assert ebit("actuals") == Decimal("-46120") == final_pack.subtotals.ebit_actual
+        assert ebit("actuals") - ebit("budget") == Decimal("-193120")
+        assert ebit("actuals") - ebit("prior_year") == Decimal("-146930")
+        assert total("revenue", "actuals") - total("revenue", "prior_year") == Decimal("128270")
+
+    @pytest.mark.parametrize("make", ["sample", "upside"])
+    def test_the_walk_sums_exactly_to_actual_ebit(self, final_pack, make):
+        from src.story import ebit_walk
+        pack = final_pack if make == "sample" else _upside()
+        steps = ebit_walk(pack)
+        assert [s.label for s in steps] == ["Budget EBIT", "Revenue", "COGS", "Opex", "Actual EBIT"]
+        assert steps[0].value + sum(s.value for s in steps[1:4]) == steps[4].value \
+            == pack.subtotals.ebit_actual
+
+    def test_line_effects_largest_first_and_capped(self, final_pack):
+        from src.story import line_effects
+        effects = line_effects(final_pack)
+        assert [e.name for e in effects[:4]] == ["Retail", "Marketing", "Ingredients", "Export"]
+        assert [abs(e.effect) for e in effects] == sorted((abs(e.effect) for e in effects),
+                                                          reverse=True)
+        assert {e.name for e in effects if e.material} == {"Retail", "Marketing", "Export"}
+        assert [(e.name, e.part) for e in effects[:3]] == [
+            ("Retail", "Revenue"), ("Marketing", "Opex"), ("Ingredients", "COGS")]
+        capped = line_effects(final_pack, limit=5)
+        assert capped[-1].name == "Other lines (7)" and len(capped) == 5
+        assert sum(e.effect for e in capped) == sum(e.effect for e in effects)
+
+    def test_the_pnl_message(self, final_pack):
+        from src.story import pnl_message
+        assert pnl_message(final_pack) == (
+            "Revenue was £112k (4.3%) below budget, with all three revenue lines below "
+            "budget; COGS was £34k above budget and opex £47k above.")
+        lines = [_pl("Retail", Category.REVENUE, 900000, 1000000),
+                 _pl("Export", Category.REVENUE, 260000, 250000),
+                 _pl("Ingredients", Category.COGS, 400000, 400000)]
+        assert pnl_message(_assemble_lines(lines)).startswith(
+            "Revenue was £90k (7.2%) below budget, with one of the two revenue lines below "
+            "budget;")
+
+    def test_the_story_never_says_why(self, final_pack):
+        from config import CAUSE_PHRASES
+        from src import story
+        for pack in (final_pack, _upside()):
+            text = " ".join([story.headline_sentence(pack), story.standfirst(pack),
+                             story.pnl_message(pack)]).lower()
+            assert not [c for c in CAUSE_PHRASES if c in text]
+
+    def test_the_pages_tell_it_in_order(self, final_pdf):
+        text = _flat(_pdf_pages(final_pdf))
+        order = ["Executive summary", "EBIT was a loss of £46k: £193k below budget",
+                 "Against budget, revenue was £112k lower", "Revenue £2.48m £112k (4.3%)",
+                 "Commentary", "Revenue was £2.48m", "From budget to actual EBIT",
+                 "Each step is that part of the P&L against budget",
+                 "Main drivers of the variance against budget", "Key performance indicators",
+                 "Profit and loss", "Revenue was £112k (4.3%) below budget, with all three",
+                 "Each line's effect on profit against budget", "Fav/(Adv) vs budget",
+                 "Commentary on material lines", "Cash balance", "Governance and sign-off"]
+        positions = [text.index(item) for item in order]
+        assert positions == sorted(positions)
+
+
+
+@pytest.fixture(scope="module")
+def overdrawn():
+    """A pack whose cash balance is an overdraft of £120k."""
+    from src.step5_narrate import narrate
+    kpis = [Kpi(metric="Cash balance (GBP 000s)", actual=Decimal("-120"),
+                target=Decimal("300"), prior_year=Decimal("250"))]
+    return narrate(_assemble_lines(_clean_pnl(), kpis))
+
+
+class TestNegativeCash:
+    """An overdraft keeps its sign in every sentence: the template's, the model's facts."""
+
+    def test_the_phrase(self):
+        from src.formatting import cash_balance_phrase
+        assert cash_balance_phrase(Decimal("1176"), 1000) == "£1.18m"
+        assert cash_balance_phrase(Decimal("-120"), 1000) == "an overdraft of £120k"
+        assert cash_balance_phrase(Decimal("-120000"), 1) == "an overdraft of £120k"
+        assert cash_balance_phrase(Decimal("0"), 1000) == "£0"
+
+    def test_the_template_sentence_keeps_the_sign(self, overdrawn):
+        assert overdrawn.section(SectionType.CASH).narrative == (
+            "The cash balance was an overdraft of £120k, £420k below target and £370k below "
+            "last year.")
+        assert overdrawn.numeric_warnings == []
+
+    def test_the_model_is_told_it_is_an_overdraft(self, overdrawn):
+        from src.step5_narrate import build_prompt, narrative_facts
+        _, user = build_prompt(narrative_facts(overdrawn), overdrawn.entity, overdrawn.period)
+        assert "Cash balance: an overdraft of £120k; £420k below target; £370k below last year." in user

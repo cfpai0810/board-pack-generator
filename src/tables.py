@@ -23,9 +23,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.formatting import (
-    fav_adv, fav_adv_pct, margin_cell, pct, pts_cell, table_value,
+    fav_adv, fav_adv_pct, margin_cell, pct, prose_money, pts_cell, table_value,
 )
 from src.state import SUBTOTALS, Category, Pack, SectionType, subtotal_key
+from src.story import against, meaningful, points_against
 
 # -- Palette: colour only for status and materiality ---------------------------
 
@@ -145,6 +146,48 @@ DRIVERS_HEADER = (("Subtotal", "Line", "Impact on profit"), ("", "", "Fav/(Adv) 
 # Subtotals whose drivers are tabulated: the ones that span categories, so
 # the table says which side of the P&L moved them.
 ATTRIBUTED = (subtotal_key("gross_profit"), subtotal_key("ebit"))
+
+
+# -- The headline figures ------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Tile:
+    """One headline figure: its name, its value, and how it did against budget and last year."""
+    label: str
+    value: str
+    budget: str
+    last_year: str
+
+
+def headline_tiles(pack: Pack) -> list[Tile]:
+    """
+    Revenue, gross profit, gross margin and EBIT, each against budget and
+    against last year in the words the commentary uses ('£112k (4.3%) below
+    budget'), in the scale its value is written in, with a loss in brackets
+    as the tables show it. Percentages across a change of sign are left out,
+    as the tables show n/m.
+    """
+    s = pack.subtotals
+
+    def money(v) -> str:
+        return f"({prose_money(v)})" if v < 0 else prose_money(v)
+
+    def tile(label: str, prefix: str) -> Tile:
+        actual = getattr(s, f"{prefix}_actual")
+        budget, py = getattr(s, f"{prefix}_budget"), getattr(s, f"{prefix}_py")
+        return Tile(
+            label, money(actual),
+            against(getattr(s, f"{prefix}_var_budget_abs"), "budget",
+                    meaningful(getattr(s, f"{prefix}_var_budget_pct"), actual, budget)),
+            against(getattr(s, f"{prefix}_var_py_abs"), "last year",
+                    meaningful(getattr(s, f"{prefix}_var_py_pct"), actual, py)))
+
+    margin = Tile("Gross margin",
+                  "n/m" if s.gross_margin_actual is None else pct(s.gross_margin_actual),
+                  points_against(s.gross_margin_var_budget_pts, "budget"),
+                  points_against(s.gross_margin_var_py_pts, "last year"))
+    return [tile("Revenue", "revenue"), tile("Gross profit", "gross_profit"), margin,
+            tile("EBIT", "ebit")]
 
 
 DRIVERS_NOTE = ("Computed from the P&L: each line's budget variance as its effect on "

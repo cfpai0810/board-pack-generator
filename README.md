@@ -26,6 +26,14 @@ they type, and signs with their name and the word SIGN. The output is a PDF
 board pack (DRAFT or FINAL) and a JSONL audit trail that links each review to
 the exact file it produced.
 
+The PDF reads as a story. Page 1 opens with a headline computed from the
+figures (EBIT against budget and last year) and a line on where the variance
+came from, then the headline figures, the commentary, a bridge from budget to
+actual EBIT beside the drivers table, and the KPIs. The P&L page opens with its
+own message and a chart of each line's effect on profit, then the full table;
+cash and the governance panel follow. Every sentence of that story is computed
+by rule and says what moved and by how much, never why.
+
 Two ways to use it:
 
 **CLI.** Run `python main.py` for a guided review at the terminal, or
@@ -259,7 +267,7 @@ PDF's file name and SHA-256.
 
 ## Test suite
 
-553 tests (475 on the engine, 78 on the web app), with no real API calls:
+570 tests (492 on the engine, 78 on the web app), with no real API calls:
 the model path is tested with fake clients, and the suite blocks every
 network connection.
 

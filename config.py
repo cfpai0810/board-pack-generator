@@ -80,7 +80,7 @@ DIRECTION_PHRASES = (
 # the project is a git repository; otherwise this constant. Bump it whenever
 # a change could alter a figure or the narrative from the same inputs.
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 # -- The repository -------------------------------------------------------------
 

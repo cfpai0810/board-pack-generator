@@ -78,6 +78,19 @@ def prose_cash(value: Decimal, scale) -> str:
     return prose_money(cash_pounds(value, scale))
 
 
+def cash_balance_phrase(value: Decimal, scale) -> str:
+    """
+    A cash balance for prose, which may be negative: '£1.18m', or 'an
+    overdraft of £120k'. prose_cash gives a magnitude, right for a difference
+    ('£174k below target') but not for the balance itself, whose sign the
+    sentence must carry, as profit_phrase carries a loss.
+    """
+    pounds = cash_pounds(value, scale)
+    if pounds < 0 and not is_nil(pounds):
+        return f"an overdraft of {prose_money(pounds)}"
+    return prose_money(pounds)
+
+
 def profit_phrase(value: Decimal, qualifier: str = "") -> str:
     """
     A profit figure that may be negative: 'a loss of £46k', 'a profit of

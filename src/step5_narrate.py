@@ -62,7 +62,7 @@ from config import (
     NARRATIVE_MODEL,
 )
 from src.formatting import (
-    cash_pounds, direction, is_nil, number, pct, profit_phrase, prose_cash,
+    cash_balance_phrase, cash_pounds, direction, is_nil, number, pct, profit_phrase, prose_cash,
     prose_money, pts, sign_change,
 )
 from src import notes
@@ -226,7 +226,7 @@ def narrative_facts(pack: Pack) -> dict:
     if cash_figures["supplied"]:
         cash = {
             "supplied": True,
-            "value": prose_cash(cash_figures["actual"], pack.cash_scale),
+            "value": cash_balance_phrase(cash_figures["actual"], pack.cash_scale),
             "vs_target": _vs_cash(cash_figures["delta_target"], "target", pack.cash_scale),
             "vs_last_year": _vs_cash(cash_figures["delta_py"], "last year", pack.cash_scale),
         }
