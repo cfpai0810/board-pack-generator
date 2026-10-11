@@ -1,9 +1,9 @@
 {
   "written_by": "tests/conftest.py, after a full passing run of the suite",
-  "total": 592,
+  "total": 626,
   "by_suite": {
-    "engine": 512,
-    "web": 80
+    "engine": 542,
+    "web": 84
   },
   "by_area": [
     {
@@ -40,7 +40,7 @@
     },
     {
       "area": "Command line",
-      "tests": 21
+      "tests": 23
     },
     {
       "area": "Your own data and the notes",
@@ -55,12 +55,16 @@
       "tests": 13
     },
     {
+      "area": "Currency",
+      "tests": 28
+    },
+    {
       "area": "Web app: review stage",
       "tests": 38
     },
     {
       "area": "Web app: own files and the model",
-      "tests": 32
+      "tests": 36
     },
     {
       "area": "Web app: content pages",
@@ -78,7 +82,10 @@
     "TestCompute": 73,
     "TestComputedText": 5,
     "TestContentPages": 7,
+    "TestCurrency": 19,
+    "TestCurrencyChoice": 4,
     "TestDirectionFlag": 6,
+    "TestFit": 9,
     "TestFormatting": 32,
     "TestGlossary": 13,
     "TestGlyphsAndDraftRecord": 10,
@@ -98,6 +105,7 @@
     "TestPagesLoad": 6,
     "TestPipelineSurface": 18,
     "TestPlainNotes": 9,
+    "TestPublishedCommands": 2,
     "TestRender": 43,
     "TestReview": 20,
     "TestReviewStage": 17,
