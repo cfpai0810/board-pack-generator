@@ -33,7 +33,7 @@ worded, the model read a cost overspend as an offset or set it in
 contrast. Both paths now say what moved and by how much, nothing more.
 
 The soft numeric check runs after either path. Every numeric token in the
-prose is read with its unit, converted to base units (pounds, percent,
+prose is read with its unit, converted to base units (whole units of money, percent,
 points) and matched by MAGNITUDE (prose carries direction words, not
 signs) against every figure the pack holds. A token matches if a figure
 rounds to it at the token's own precision, so "about £2.5m" matches
@@ -62,7 +62,7 @@ from config import (
     NARRATIVE_MODEL,
 )
 from src.formatting import (
-    cash_balance_phrase, cash_pounds, direction, is_nil, number, pct, profit_phrase, prose_cash,
+    CURRENCIES, cash_balance_phrase, cash_amount, direction, is_nil, number, pct, profit_phrase, prose_cash,
     prose_money, pts, sign_change,
 )
 from src import notes
@@ -76,7 +76,7 @@ _PROFIT_SUBTOTALS = {subtotal_key("gross_profit"), subtotal_key("ebit")}
 HEADLINE_KEYS = {subtotal_key("revenue"), subtotal_key("gross_profit"), subtotal_key("ebit")}
 
 # A trailing "(unit)" on a metric name, dropped where the formatter states
-# the unit itself (cash in pounds, gross margin in %).
+# the unit itself (cash in the pack's currency, gross margin in %).
 _UNIT_SUFFIX = re.compile(r"\s*\([^)]*\)\s*$")
 
 # A trailing unit made of words, "DSO (days)", which reads better in prose
@@ -90,11 +90,11 @@ MODEL = "model"
 
 # -- Phrases from formatted figures -------------------------------------------
 
-def _vs_money(var_abs: Decimal, against: str) -> str:
+def _vs_money(var_abs: Decimal, against: str, currency: str) -> str:
     """'£56k below budget', or 'in line with budget'."""
     if is_nil(var_abs):
         return f"in line with {against}"
-    return f"{prose_money(var_abs)} {direction(var_abs, against)}"
+    return f"{prose_money(var_abs, currency)} {direction(var_abs, against)}"
 
 
 def _meaningful(var_pct, actual: Decimal, comparator: Decimal):
@@ -102,17 +102,17 @@ def _meaningful(var_pct, actual: Decimal, comparator: Decimal):
     return None if sign_change(actual, comparator) else var_pct
 
 
-def _vs_budget(var_abs: Decimal, var_pct) -> str:
+def _vs_budget(var_abs: Decimal, var_pct, currency: str) -> str:
     """'£112k (4.3%) below budget'; no % when the budget is zero."""
     if var_pct is None or is_nil(var_abs):
-        return _vs_money(var_abs, "budget")
-    return f"{prose_money(var_abs)} ({pct(var_pct)}) {direction(var_abs, 'budget')}"
+        return _vs_money(var_abs, "budget", currency)
+    return f"{prose_money(var_abs, currency)} ({pct(var_pct)}) {direction(var_abs, 'budget')}"
 
 
-def _vs_pct(var_abs: Decimal, var_pct, against: str) -> str:
+def _vs_pct(var_abs: Decimal, var_pct, against: str, currency: str) -> str:
     """'5.5% above last year'; money when the comparator was zero."""
     if var_pct is None:
-        return _vs_money(var_abs, against)
+        return _vs_money(var_abs, against, currency)
     return f"{pct(var_pct)} {direction(var_pct, against, places=1)}"
 
 
@@ -140,13 +140,13 @@ def _vs_number(value, against: str, unit=None):
     return f"{_with_unit(number(value), unit)} {direction(value, against, places=1)}"
 
 
-def _vs_cash(value, against: str, scale):
-    return None if value is None else _vs_money(cash_pounds(value, scale), against)
+def _vs_cash(value, against: str, scale, currency: str):
+    return None if value is None else _vs_money(cash_amount(value, scale), against, currency)
 
 
 # -- Facts: every figure the commentary may use, formatted once ---------------
 
-def _item_fact(fig: dict) -> dict:
+def _item_fact(fig: dict, currency: str) -> dict:
     """
     One featured line or subtotal. A profit subtotal with a negative actual,
     budget or last year uses the loss form ('a loss of £46k against a
@@ -158,20 +158,21 @@ def _item_fact(fig: dict) -> dict:
     if profit and min(fig["actual"], fig["budget"], fig["prior_year"]) < 0:
         return {
             **base, "form": "loss",
-            "value": profit_phrase(fig["actual"]),
-            "budget": profit_phrase(fig["budget"], "budgeted "),
-            "vs_budget": _vs_money(fig["var_budget_abs"], "budget"),
-            "last_year": profit_phrase(fig["prior_year"]),
+            "value": profit_phrase(fig["actual"], currency),
+            "budget": profit_phrase(fig["budget"], currency, "budgeted "),
+            "vs_budget": _vs_money(fig["var_budget_abs"], "budget", currency),
+            "last_year": profit_phrase(fig["prior_year"], currency),
         }
     return {
         **base, "form": "standard",
-        "value": prose_money(fig["actual"]),
+        "value": prose_money(fig["actual"], currency),
         "vs_budget": _vs_budget(
             fig["var_budget_abs"],
-            _meaningful(fig["var_budget_pct"], fig["actual"], fig["budget"])),
+            _meaningful(fig["var_budget_pct"], fig["actual"], fig["budget"]), currency),
         "vs_last_year": _vs_pct(
             fig["var_py_abs"],
-            _meaningful(fig["var_py_pct"], fig["actual"], fig["prior_year"]), "last year"),
+            _meaningful(fig["var_py_pct"], fig["actual"], fig["prior_year"]), "last year",
+            currency),
     }
 
 
@@ -210,23 +211,24 @@ def narrative_facts(pack: Pack) -> dict:
 
     # The headline, the summary line and the tiles already give revenue, gross
     # profit, the gross margin and EBIT; the commentary covers the rest.
-    exec_items = [_item_fact(f) for f in exec_figures["items"] if f["key"] not in HEADLINE_KEYS]
+    c = pack.currency
+    exec_items = [_item_fact(f, c) for f in exec_figures["items"] if f["key"] not in HEADLINE_KEYS]
     if exec_figures["items"]:
         nothing_material = ("Beyond the headline figures, no line or subtotal is material "
                             "against budget.")
     else:
         nothing_material = (
-            f"No P&L item moved against budget by {prose_money(flags.materiality_abs)} "
+            f"No P&L item moved against budget by {prose_money(flags.materiality_abs, c)} "
             f"or {pct(flags.materiality_pct)} or more."
         )
-    commentary = [_item_fact(f) for f in pnl_figures["commentary_items"]]
+    commentary = [_item_fact(f, c) for f in pnl_figures["commentary_items"]]
 
     if cash_figures["supplied"]:
         cash = {
             "supplied": True,
-            "value": cash_balance_phrase(cash_figures["actual"], pack.cash_scale),
-            "vs_target": _vs_cash(cash_figures["delta_target"], "target", pack.cash_scale),
-            "vs_last_year": _vs_cash(cash_figures["delta_py"], "last year", pack.cash_scale),
+            "value": cash_balance_phrase(cash_figures["actual"], pack.cash_scale, c),
+            "vs_target": _vs_cash(cash_figures["delta_target"], "target", pack.cash_scale, c),
+            "vs_last_year": _vs_cash(cash_figures["delta_py"], "last year", pack.cash_scale, c),
         }
     else:
         cash = {"supplied": False, "note": cash_figures["note"]}
@@ -303,10 +305,10 @@ def template_sections(facts: dict) -> dict[str, str]:
 
 # -- The model path: prompt -----------------------------------------------------
 
-SYSTEM_PROMPT = """You draft the commentary for a monthly board pack. Every figure has already been computed and checked. Your job is to put the figures you are given into clear, plain prose.
+_SYSTEM_PROMPT = """You draft the commentary for a monthly board pack. Every figure has already been computed and checked. Your job is to put the figures you are given into clear, plain prose.
 
 Rules:
-1. Use only the figures in the facts you are given, and quote each one exactly as it is written there, for example "£112k", "4.3%" or "4.1 pts". Do not introduce any other number. Do not recalculate, combine, re-round or convert a figure.
+1. Use only the figures in the facts you are given, and quote each one exactly as it is written there, for example "{example}", "4.3%" or "4.1 pts". Do not introduce any other number. Do not recalculate, combine, re-round or convert a figure.
 2. Say what moved and by how much. Do not say which lines drove a movement or which lines offset it: that attribution is computed and shown in a table beside the summary.
 3. Do not state, guess or imply why anything moved. The reviewer adds the reasons at review. Avoid words that introduce a cause, such as "because", "due to", "as a result of" or "reflecting".
 4. Write direction in words, as the facts do ("above budget", "below last year", "a loss of"). Never write a minus sign.
@@ -327,7 +329,12 @@ def _parts_line(name: str, value: str, parts: list) -> str:
     return "; ".join([f"{name}: {value}"] + [p for p in parts if p]) + "."
 
 
-def build_prompt(facts: dict, entity: str, period: str) -> tuple[str, str]:
+def system_prompt(currency: str) -> str:
+    """The model's rules, with an example amount in the pack's currency."""
+    return _SYSTEM_PROMPT.replace("{example}", f"{CURRENCIES[currency].prefix}112k")
+
+
+def build_prompt(facts: dict, entity: str, period: str, *, currency: str) -> tuple[str, str]:
     """(system, user) for the model, built only from the formatted facts."""
     ex = facts[SectionType.EXEC_SUMMARY.value]
     pnl = facts[SectionType.PNL.value]
@@ -343,7 +350,7 @@ def build_prompt(facts: dict, entity: str, period: str) -> tuple[str, str]:
                  if cash["supplied"] else cash["note"])
 
     user = "\n".join([
-        f"Pack: {entity}, {period}.",
+        f"Pack: {entity}, {period}. Amounts are in {CURRENCIES[currency].name}.",
         "",
         "exec_summary: a short board-level summary of the featured items below, in the order "
         "given. The board sees revenue, gross profit, the gross margin and EBIT above the "
@@ -364,7 +371,7 @@ def build_prompt(facts: dict, entity: str, period: str) -> tuple[str, str]:
         "do not describe inflows, outflows or movements.",
         cash_line,
     ])
-    return SYSTEM_PROMPT, user
+    return system_prompt(currency), user
 
 
 # -- The model path: call and parse --------------------------------------------
@@ -408,7 +415,7 @@ def clean_dashes(text: str) -> str:
 
 def _model_drafts(client, facts: dict, pack: Pack) -> tuple[dict[str, str], list[str]]:
     """Ask the model; return (drafts by section, data notes). Never raises."""
-    system, user = build_prompt(facts, pack.entity, pack.period)
+    system, user = build_prompt(facts, pack.entity, pack.period, currency=pack.currency)
     try:
         response = call_model(client, system, user)
     except Exception as e:  # any failure degrades to the template
@@ -441,7 +448,7 @@ def _model_drafts(client, facts: dict, pack: Pack) -> tuple[dict[str, str], list
 # -- The soft numeric check ---------------------------------------------------
 
 _TOKEN = re.compile(
-    r"(?<!\w)(?P<cur>£)?"
+    r"(?<!\w)(?P<cur>£|€|\$|¥|CHF\s?)?"
     r"(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
     r"(?:(?P<scale>bn|[km])\b"
     r"|\s(?P<word>billion|million|thousand)\b"
@@ -455,7 +462,7 @@ _EXPONENT = {"k": 3, "thousand": 3, "m": 6, "million": 6, "bn": 9, "billion": 9}
 def comparison_set(pack: Pack) -> dict[str, set[Decimal]]:
     """
     Every figure the pack holds, as magnitudes in base units, by kind:
-    money (pounds, cash converted from thousands), percent, points, and
+    money (whole units, cash converted from thousands), percent, points, and
     plain KPI figures. Driver impacts are the lines' own budget variances,
     so they are already present. The materiality thresholds are included
     because the summary may state them.
@@ -485,7 +492,7 @@ def comparison_set(pack: Pack) -> dict[str, set[Decimal]]:
             add(percent, k.actual, k.target, k.prior_year)
             add(points, k.delta_target, k.delta_py)
         elif k.metric == cash_metric:
-            add(money, *(cash_pounds(v, pack.cash_scale) for v in values if v is not None))
+            add(money, *(cash_amount(v, pack.cash_scale) for v in values if v is not None))
         else:
             add(plain, *values)
 
@@ -514,7 +521,11 @@ def _matches(value: Decimal, places: int, exponent: int, figures: set[Decimal]) 
 
 
 def unmatched_tokens(text: str, pack: Pack, figures=None) -> list[str]:
-    """Numeric tokens in text that no figure in the pack rounds to, in order, once each."""
+    """
+    Numeric tokens in text that no figure in the pack rounds to, in order,
+    once each. An amount written in another currency matches nothing: '$112k'
+    is not a figure of a pack in euros, whatever its number.
+    """
     figures = figures or comparison_set(pack)
     for label in _labels(pack):
         text = text.replace(label, " " * len(label))
@@ -534,7 +545,8 @@ def unmatched_tokens(text: str, pack: Pack, figures=None) -> list[str]:
         else:
             kind, exponent = "any", 0
         token = m.group(0).strip()
-        if not _matches(value, places, exponent, figures[kind]) and token not in unmatched:
+        other = m.group("cur") and m.group("cur").strip() != CURRENCIES[pack.currency].sign
+        if (other or not _matches(value, places, exponent, figures[kind])) and token not in unmatched:
             unmatched.append(token)
     return unmatched
 

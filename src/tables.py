@@ -8,7 +8,8 @@ So the board's PDF and the screen can never disagree on a cell, and no
 Decimal ever reaches a display layer: every value here has already passed
 through src/formatting.py.
 
-The conventions are the PDF's. Values are whole pounds with negatives in
+The conventions are the PDF's. Values are whole units of the pack's
+currency (its sign in the header's units row) with negatives in
 brackets. Variance columns are Fav/(Adv): costs are sign-flipped for
 display only. A percentage across a change of sign or over a zero
 comparator is n/m. Margin points sit in the % column of each Fav/(Adv)
@@ -24,7 +25,7 @@ import re
 from dataclasses import dataclass
 
 from src.formatting import (
-    cash_pounds, fav_adv, fav_adv_pct, margin_cell, pct, prose_money, pts_cell, table_number,
+    CURRENCIES, cash_amount, fav_adv, fav_adv_pct, margin_cell, pct, prose_money, pts_cell, table_number,
     table_value,
 )
 from src.state import SUBTOTALS, Category, Pack, SectionType, subtotal_key
@@ -39,11 +40,12 @@ RULE_HEX = "#808080"
 
 # -- The P&L table --------------------------------------------------------------
 
-PNL_HEADER = (
-    ("", "Actual", "Budget", "Prior year", "Fav/(Adv) vs budget", "",
-     "Fav/(Adv) vs prior year", ""),
-    ("", "£", "£", "£", "£", "%", "£", "%"),
-)
+def pnl_header(currency: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The P&L table's two header rows, the units row in the pack's currency."""
+    sign = CURRENCIES[currency].sign
+    return (("", "Actual", "Budget", "Prior year", "Fav/(Adv) vs budget", "",
+             "Fav/(Adv) vs prior year", ""),
+            ("", sign, sign, sign, sign, "%", sign, "%"))
 
 LINE = "line"
 SUBTOTAL = "subtotal"
@@ -131,7 +133,8 @@ def pnl_notes(pack: Pack) -> list[str]:
     """
     flags = pack.material_flags
     return [
-        f"* Material: a variance against budget of £{table_value(flags.materiality_abs)} "
+        f"* Material: a variance against budget of "
+        f"{CURRENCIES[pack.currency].prefix}{table_value(flags.materiality_abs)} "
         f"or {pct(flags.materiality_pct)} or more. The percentage test is not applied "
         f"across a change of sign. Material rows are shaded and marked *.",
         "Figures are calculated before rounding, so totals and differences may not add exactly.",
@@ -144,7 +147,10 @@ def pnl_notes(pack: Pack) -> list[str]:
 # -- The drivers table ------------------------------------------------------------
 
 DRIVERS_TITLE = "Main drivers of the variance against budget"
-DRIVERS_HEADER = (("Subtotal", "Line", "Impact on profit"), ("", "", "Fav/(Adv) £"))
+def drivers_header(currency: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The drivers table's two header rows, the impact in the pack's currency."""
+    return (("Subtotal", "Line", "Impact on profit"),
+            ("", "", f"Fav/(Adv) {CURRENCIES[currency].sign}"))
 
 # Subtotals whose drivers are tabulated: the ones that span categories, so
 # the table says which side of the P&L moved them.
@@ -170,10 +176,10 @@ def headline_tiles(pack: Pack) -> list[Tile]:
     as the tables show it. Percentages across a change of sign are left out,
     as the tables show n/m.
     """
-    s = pack.subtotals
+    s, c = pack.subtotals, pack.currency
 
     def money(v) -> str:
-        return f"({prose_money(v)})" if v < 0 else prose_money(v)
+        return f"({prose_money(v, c)})" if v < 0 else prose_money(v, c)
 
     def tile(label: str, prefix: str) -> Tile:
         actual = getattr(s, f"{prefix}_actual")
@@ -181,9 +187,9 @@ def headline_tiles(pack: Pack) -> list[Tile]:
         return Tile(
             label, money(actual),
             against(getattr(s, f"{prefix}_var_budget_abs"), "budget",
-                    meaningful(getattr(s, f"{prefix}_var_budget_pct"), actual, budget)),
+                    meaningful(getattr(s, f"{prefix}_var_budget_pct"), actual, budget), currency=c),
             against(getattr(s, f"{prefix}_var_py_abs"), "last year",
-                    meaningful(getattr(s, f"{prefix}_var_py_pct"), actual, py)))
+                    meaningful(getattr(s, f"{prefix}_var_py_pct"), actual, py), currency=c))
 
     margin = Tile("Gross margin",
                   "n/m" if s.gross_margin_actual is None else pct(s.gross_margin_actual),
@@ -213,11 +219,12 @@ def commentary_source(pack: Pack) -> str:
 
 def cash_note(pack: Pack) -> str:
     """How the cash figures relate to the KPI file, from the run's own cash scale."""
+    name = CURRENCIES[pack.currency].name
     if pack.cash_scale == 1:
-        return "Stated in pounds, as in the KPI file."
+        return f"Stated in {name}, as in the KPI file."
     if pack.cash_scale == 1000:
-        return "Converted to pounds from the KPI file, which states cash in thousands."
-    return f"Converted to pounds from the KPI file, at {pack.cash_scale:,} pounds per unit."
+        return f"Converted to {name} from the KPI file, which states cash in thousands."
+    return f"Converted to {name} from the KPI file, at {pack.cash_scale:,} {name} per unit."
 
 
 @dataclass(frozen=True)
@@ -250,7 +257,11 @@ def drivers_rows(pack: Pack) -> list[DriverRow]:
 # -- The KPI and cash tables ----------------------------------------------------
 
 KPI_HEADER = ("", "Actual", "Target", "Prior year", "vs target", "vs prior year")
-CASH_HEADER = (KPI_HEADER, ("", "£", "£", "£", "£", "£"))
+
+
+def cash_header(currency: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The cash table's two header rows: the KPI table's, then a units row in the pack's currency."""
+    return KPI_HEADER, ("",) + (CURRENCIES[currency].sign,) * 5
 
 
 def kpi_rows(pack: Pack) -> list[tuple[str, tuple[str, ...]]]:
@@ -276,7 +287,7 @@ def kpi_rows(pack: Pack) -> list[tuple[str, tuple[str, ...]]]:
 
 
 def cash_cells(pack: Pack) -> tuple[str, ...]:
-    """The cash balance in pounds, under the KPI table's headers; n/a where missing."""
+    """The cash balance in whole units of the pack's currency, under the KPI table's headers; n/a where missing."""
     figures = pack.section(SectionType.CASH).figures
-    return tuple("n/a" if figures[f] is None else table_value(cash_pounds(figures[f], pack.cash_scale))
+    return tuple("n/a" if figures[f] is None else table_value(cash_amount(figures[f], pack.cash_scale))
                  for f in ("actual", "target", "prior_year", "delta_target", "delta_py"))

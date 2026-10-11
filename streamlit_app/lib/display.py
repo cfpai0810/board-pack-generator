@@ -9,7 +9,7 @@
 
 import html
 
-from src.pipeline import DRIVERS_HEADER, PNL_HEADER, DriverRow, PnlRow, ScreenChart, Tile
+from src.pipeline import DriverRow, PnlRow, ScreenChart, Tile
 
 _E = html.escape
 
@@ -54,8 +54,9 @@ def commentary_html(text: str) -> str:
     return f'<div class="bp-commentary">{_E(text).replace(chr(10), "<br>")}</div>'
 
 
-def pnl_table_html(rows: list[PnlRow]) -> str:
-    top, units = PNL_HEADER
+def pnl_table_html(rows: list[PnlRow], header) -> str:
+    """The P&L table; header is pnl_header(pack.currency), as the PDF draws it."""
+    top, units = header
     head = (
         "<tr>"
         f'<th>{_E(top[0])}</th><th class="num">{_E(top[1])}</th>'
@@ -74,8 +75,9 @@ def pnl_table_html(rows: list[PnlRow]) -> str:
             f'<tbody>{"".join(body)}</tbody></table></div>')
 
 
-def drivers_table_html(rows: list[DriverRow]) -> str:
-    top, units = DRIVERS_HEADER
+def drivers_table_html(rows: list[DriverRow], header) -> str:
+    """The drivers table; header is drivers_header(pack.currency), as the PDF draws it."""
+    top, units = header
     head = (f'<tr><th>{_E(top[0])}</th><th>{_E(top[1])}</th><th class="num">{_E(top[2])}</th></tr>'
             f'<tr><th></th><th></th><th class="num">{_E(units[2])}</th></tr>')
     body = "".join(

@@ -366,8 +366,10 @@ class Pack:
     summary the reviewer confirmed: every flag and data note outstanding
     when they signed. run_id is the latest review run, so a render can link its
     audit event to it; code_version is the code that computed the figures.
-    cash_scale is what one unit of the cash KPI is worth in pounds (1000 when
-    the file states cash in thousands, 1 when in pounds): an input of the
+    currency is the ISO code every amount is written in (formatting.CURRENCIES),
+    an input of the run, never a conversion. cash_scale is what one unit of the
+    cash KPI is worth in whole units (1000 when
+    the file states cash in thousands, 1 when in whole units): an input of the
     run, never assumed. kpis_supplied is False when the run had no KPI file,
     so the governance block can say so rather than show an empty hash.
     """
@@ -398,6 +400,7 @@ class Pack:
     run_id: str = ""
     code_version: str = ""
     cash_scale: int = 1000
+    currency: str = "GBP"
     kpis_supplied: bool = True
 
     def section(self, section_type: SectionType) -> Section:

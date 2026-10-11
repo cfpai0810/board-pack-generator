@@ -43,11 +43,11 @@ from decimal import Decimal
 from typing import Optional
 
 from config import (
-    CASH_KPI_METRIC, CASH_KPI_SCALE, ENTITY_NAME, MATERIALITY_ABS, MATERIALITY_PCT,
+    CASH_KPI_METRIC, CASH_KPI_SCALE, CURRENCY, ENTITY_NAME, MATERIALITY_ABS, MATERIALITY_PCT,
     PERIOD,
 )
 from src import notes
-from src.formatting import cash_pounds, prose_money, sign_change
+from src.formatting import CURRENCIES, cash_amount, prose_money, sign_change
 from src.state import (
     SECTION_TITLES, SUBTOTALS, Category, Kpi, MaterialFlags, Pack, PackStatus, PnlLine,
     Section, SectionType, Subtotals, line_key, subtotal_key,
@@ -328,47 +328,83 @@ def _cash_section(kpis: list[Kpi], problems: list[str], kpis_supplied: bool = Tr
 
 # -- Guards against the wrong cash unit ----------------------------------------------
 
-_THOUSANDS_HINT = re.compile(r"000|thousand|£\s*k\b|gbp\s*k\b|^k$", re.IGNORECASE)
-_POUNDS_HINT = re.compile(r"^(gbp|£|pounds?|sterling|gbp\s*£|£\s*gbp)$", re.IGNORECASE)
+# What a cash KPI's unit may call each currency: its code and name (words),
+# and its sign. A word counts only standing alone ("eur", not inside "europe");
+# a sign counts anywhere ("€k").
+_CURRENCY_WORDS = {
+    "GBP": (r"gbp|pounds?|sterling", r"£"),
+    "EUR": (r"eur|euros?", r"€"),
+    "USD": (r"usd|(?:us\s*)?dollars?", r"\$"),
+    "JPY": (r"jpy|yen", r"¥"),
+    "CHF": (r"chf|(?:swiss\s*)?francs?", None),
+}
+_NAMED = {code: rf"(?<![a-z])(?:{words})(?![a-jl-z])" + (f"|{sign}" if sign else "")
+          for code, (words, sign) in _CURRENCY_WORDS.items()}
+_ANY_CURRENCY = "|".join(f"{words}|{sign}" if sign else words
+                         for words, sign in _CURRENCY_WORDS.values())
+_THOUSANDS_HINT = re.compile(rf"000|thousand|(?:{_ANY_CURRENCY})\s*k\b|^k$", re.IGNORECASE)
+_UNITS_HINT = re.compile(rf"^(?:{_ANY_CURRENCY})(?:\s*(?:{_ANY_CURRENCY}))?$", re.IGNORECASE)
 CASH_REVENUE_MULTIPLE = Decimal("100")
+
+
+def _unit(metric: str) -> Optional[str]:
+    found = re.search(r"\(([^)]*)\)\s*$", metric)
+    return found.group(1).strip() if found else None
 
 
 def unit_hint(metric: str) -> Optional[int]:
     """
     What the cash KPI's own name says its unit is: 1000 for "(GBP 000s)",
-    "(£000)", "(£k)" or "(thousands)", 1 for "(GBP)", "(£)" or "(pounds)",
+    "(€000)", "(£k)" or "(thousands)", 1 for "(GBP)", "($)" or "(pounds)",
     None when the name carries no unit or one this does not recognise.
     """
-    found = re.search(r"\(([^)]*)\)\s*$", metric)
-    if not found:
+    unit = _unit(metric)
+    if unit is None:
         return None
-    unit = found.group(1).strip()
     if _THOUSANDS_HINT.search(unit):
         return 1000
-    if _POUNDS_HINT.match(unit):
+    if _UNITS_HINT.match(unit):
         return 1
     return None
 
 
-def cash_unit_notes(kpis: list[Kpi], subtotals: Subtotals, cash_scale: int) -> list[str]:
+def currency_hint(metric: str) -> Optional[str]:
+    """The currency the cash KPI's own name states, as an ISO code: 'USD' for "(USD 000s)" or "($k)"."""
+    unit = _unit(metric)
+    if unit is None:
+        return None
+    for code, pattern in _NAMED.items():
+        if re.search(pattern, unit, re.IGNORECASE):
+            return code
+    return None
+
+
+def cash_unit_notes(kpis: list[Kpi], subtotals: Subtotals, cash_scale: int,
+                    currency: str) -> list[str]:
     """
-    Two soft checks on the unit chosen for cash, the input most likely to be
-    wrong and wrong by a factor of a thousand. Each is a note for the data
-    notes and the sign-off summary, never a block:
+    Soft checks on the unit chosen for cash, the input most likely to be
+    wrong and wrong by a factor of a thousand, and on the currency. Each is a
+    note for the data notes and the sign-off summary, never a block:
       - the cash KPI's name states a unit that disagrees with the one chosen;
-      - the cash balance in pounds is more than 100 times the month's revenue.
+      - the cash KPI's name states a currency other than the pack's;
+      - the cash balance is more than 100 times the month's revenue.
     """
     cash = next((k for k in kpis if k.is_metric(CASH_KPI_METRIC, ignore_unit=True)), None)
     if cash is None or cash.actual is None:
         return []
     found = []
     hinted = unit_hint(cash.metric)
+    name = CURRENCIES[currency].name
     if hinted is not None and hinted != cash_scale:
-        found.append(notes.cash_unit_hint(cash.metric, hinted, cash_scale))
+        found.append(notes.cash_unit_hint(cash.metric, hinted, cash_scale, name))
+    named = currency_hint(cash.metric)
+    if named is not None and named != currency:
+        found.append(notes.cash_currency_hint(cash.metric, CURRENCIES[named].name, name))
     revenue = subtotals.revenue_actual
-    balance = cash_pounds(cash.actual, cash_scale)
+    balance = cash_amount(cash.actual, cash_scale)
     if revenue > 0 and balance.copy_abs() > CASH_REVENUE_MULTIPLE * revenue:
-        found.append(notes.cash_vs_revenue(prose_money(balance), prose_money(revenue)))
+        found.append(notes.cash_vs_revenue(prose_money(balance, currency),
+                                           prose_money(revenue, currency)))
     return found
 
 
@@ -388,6 +424,7 @@ def assemble(
     entity: Optional[str] = None,
     period: Optional[str] = None,
     cash_scale: Optional[int] = None,
+    currency: Optional[str] = None,
     kpis_supplied: bool = True,
     excluded_rows: tuple = (),
 ) -> Pack:
@@ -399,8 +436,8 @@ def assemble(
     the Decimal boundary here via Decimal(str(x)), so an int from a UI
     control is safe. The problems list becomes Pack.warnings, the data
     notes (the same list, with any cash note appended). The input file hashes from
-    step1 are carried onto the Pack for the audit. entity, period and
-    cash_scale are inputs of the run; left as None they come from config
+    step1 are carried onto the Pack for the audit. entity, period,
+    cash_scale and currency are inputs of the run; left as None they come from config
     (the sample), and everything downstream reads them from the Pack.
     excluded_rows names the rows behind excluded_pnl_rows, for the notice
     above the P&L table. The cash unit guards add their notes here, where
@@ -435,12 +472,14 @@ def assemble(
         _cash_section(kpis, problems, kpis_supplied),
     ]
     scale = CASH_KPI_SCALE if cash_scale is None else cash_scale
-    problems.extend(cash_unit_notes(kpis, subtotals, scale))
+    currency = CURRENCY if currency is None else currency
+    problems.extend(cash_unit_notes(kpis, subtotals, scale, currency))
 
     return Pack(
         entity=ENTITY_NAME if entity is None else entity,
         period=PERIOD if period is None else period,
         cash_scale=scale,
+        currency=currency,
         kpis_supplied=kpis_supplied,
         excluded_rows=list(excluded_rows),
         sections=sections,

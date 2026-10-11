@@ -8,7 +8,7 @@ Finance reasoning: the PDF has to read like a real board pack. The
 reader knows at once whether they hold a draft or the signed version (a
 filled status banner, and on a draft a diagonal watermark on every page, so
 a loose page cannot pass as final). The numbers follow the conventions a
-finance reader expects: whole pounds, negatives in brackets, and variance
+finance reader expects: whole units, negatives in brackets, and variance
 columns headed Fav/(Adv), where a cost overspend is adverse. The live model
 run showed that "£37k above budget" on a cost can be misread as good news;
 the Fav/(Adv) convention settles that in the tables. Material rows are bold,
@@ -53,7 +53,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from src.formatting import cash_pounds, pct, table_value, when_text
+from src.formatting import CURRENCIES, cash_amount, pct, table_value, when_text
 from src.state import Pack, PackStatus, SectionType
 from src.story import (
     ebit_walk, headline_sentence, line_effects, pnl_message, signed_money, summary_line,
@@ -61,8 +61,9 @@ from src.story import (
 from src.step5_narrate import TEMPLATE, clean_dashes
 from src.step6_review import _utc_now, excluded_rows_note, signoff_summary, write_audit
 from src.tables import (
-    CASH_HEADER, DRAFT_HEX, DRIVERS_HEADER, DRIVERS_NOTE, DRIVERS_TITLE, FINAL_HEX, KPI_HEADER, KPI_NOTE, LINE,
-    MATERIAL_HEX, PNL_HEADER, RULE_HEX, SUBTOTAL, cash_cells, cash_note, drivers_rows,
+    DRAFT_HEX, DRIVERS_NOTE, DRIVERS_TITLE, FINAL_HEX, KPI_HEADER, KPI_NOTE, LINE,
+    MATERIAL_HEX, RULE_HEX, SUBTOTAL, cash_cells, cash_header, cash_note, drivers_header,
+    drivers_rows, pnl_header,
     headline_tiles, kpi_rows, pnl_notes, pnl_rows,
 )
 
@@ -184,16 +185,44 @@ def _table_style(header_rows: int, units_row: bool) -> list:
 
 # -- The P&L table ------------------------------------------------------------
 
+_PNL_LABEL_W = 4.3 * cm          # the label column, narrowed for wide figures down to:
+_PNL_LABEL_MIN = 3.2 * cm
+_PCT_COLUMNS = (5, 7)            # the % column of each Fav/(Adv) group; the rest hold money
+_CELL_PAD = 12                   # reportlab's default 6 points either side of a cell
+
+
+def _pnl_layout(cells: list[tuple[str, ...]]) -> tuple[float, list[float], float]:
+    """
+    (label width, the seven value column widths, value font size) for the
+    P&L table's value cells, so the widest figure in each column fits. A yen
+    pack runs to eleven digits where the sample has seven: the two %
+    columns take only what they need, the five money columns share the rest,
+    and the label column gives way (its long names wrap) down to a floor.
+    Only if the figures still do not fit does their type step down from 8pt.
+    """
+    for size in (8, 7.5, 7):
+        need = [max(stringWidth(row[i], "Helvetica-Bold", size) for row in cells) + _CELL_PAD
+                for i in range(7)]
+        pct_w = max(need[c - 1] for c in _PCT_COLUMNS)
+        money_need = max(n for c, n in enumerate(need, start=1) if c not in _PCT_COLUMNS)
+        label_w = max(_PNL_LABEL_MIN, min(_PNL_LABEL_W, BODY_W - 2 * pct_w - 5 * money_need))
+        money_w = (BODY_W - label_w - 2 * pct_w) / 5
+        if money_w >= money_need:
+            break
+    widths = [pct_w if c in _PCT_COLUMNS else money_w for c in range(1, 8)]
+    return label_w, widths, size
+
+
 def _pnl_table(pack: Pack) -> Table:
     """The P&L table, drawn from src.tables.pnl_rows: the same cells the web layer shows."""
     rows = pnl_rows(pack)
-    label_w = 4.3 * cm
-    data = [list(PNL_HEADER[0]), list(PNL_HEADER[1])]
+    header = pnl_header(pack.currency)
+    label_w, widths, size = _pnl_layout([header[1][1:]] + [row.cells for row in rows])
+    data = [list(row) for row in header]
     # 18 points of padding at most: 12 to indent a line, 6 on the right
     data += [[_label(row.label, label_w - 18, bold=row.kind == SUBTOTAL), *row.cells]
              for row in rows]
 
-    num_w = (BODY_W - label_w) / 7
     style = _table_style(header_rows=2, units_row=True) + [
         ("SPAN", (4, 0), (5, 0)), ("SPAN", (6, 0), (7, 0)),
         ("ALIGN", (4, 0), (7, 0), "CENTER"),
@@ -210,11 +239,14 @@ def _pnl_table(pack: Pack) -> Table:
             style.append(("LINEABOVE", (0, i), (-1, i), 0.5, RULE))
         if row.kind == SUBTOTAL:
             style.append(("FONT", (0, i), (-1, i), "Helvetica-Bold", 8))
+            style.append(("FONT", (1, i), (-1, i), "Helvetica-Bold", size))
+        elif size != 8:
+            style.append(("FONT", (1, i), (-1, i), "Helvetica", size))
         if row.material:
             style.append(("BACKGROUND", (0, i), (-1, i), MATERIAL_FILL))
     style.append(("LINEBELOW", (0, len(data) - 2), (-1, len(data) - 2), 1.0, INK))
     style.append(("TEXTCOLOR", (0, len(data) - 1), (-1, len(data) - 1), GREY))
-    table = Table(data, colWidths=[label_w] + [num_w] * 7, repeatRows=2)
+    table = Table(data, colWidths=[label_w] + widths, repeatRows=2)
     table.setStyle(TableStyle(style))
     return table
 
@@ -235,7 +267,7 @@ def _drivers_block(pack: Pack, width=None) -> list:
         return []
     width = width or 13.2 * cm
     line_w = width - 4.5 * cm
-    rows = [list(DRIVERS_HEADER[0]), list(DRIVERS_HEADER[1])]
+    rows = [list(row) for row in drivers_header(pack.currency)]
     rows += [[r.subtotal, _label(r.line, line_w - 12), r.impact] for r in driver_rows]
     widths = [2.3 * cm, line_w, 2.2 * cm]
     style = _table_style(header_rows=2, units_row=True) + [
@@ -314,7 +346,7 @@ def _walk_chart(pack: Pack, width: Decimal, height: Decimal) -> Drawing:
                          strokeColor=None))
         rises = step.value >= 0
         drawing.add(String(_pt(x + bar_w / 2), _pt(y(high)) + 4 if rises else _pt(y(low)) - 10,
-                           signed_money(step.value), fontName="Helvetica-Bold",
+                           signed_money(step.value, pack.currency), fontName="Helvetica-Bold",
                            fontSize=7.5, fillColor=INK, textAnchor="middle"))
         if i < len(bars) - 1:
             drawing.add(Line(_pt(x + bar_w), _pt(y(level)), _pt(x + slot), _pt(y(level)),
@@ -357,7 +389,7 @@ def _effects_chart(pack: Pack, width: Decimal) -> Drawing:
         left, right = _pt(x), _pt(x + length)
         drawing.add(Rect(left, _pt(middle) - 4, max(right - left, 1), 8, strokeColor=None,
                          fillColor=INK if effect.material else BAR_LIGHT))
-        label = signed_money(effect.effect)
+        label = signed_money(effect.effect, pack.currency)
         if effect.effect < 0:
             drawing.add(String(_pt(x) - 3, text_y, label, fontName="Helvetica", fontSize=7,
                                fillColor=GREY, textAnchor="end"))
@@ -367,12 +399,12 @@ def _effects_chart(pack: Pack, width: Decimal) -> Drawing:
     return drawing
 
 
-def _cash_chart(figures: dict, scale, width: Decimal) -> Drawing:
+def _cash_chart(figures: dict, scale, width: Decimal, currency: str) -> Drawing:
     """
     The cash balance against target and last year, as three bars from zero:
     the actual dark, the comparators light, each labelled in the prose scale.
     """
-    bars = [(name, cash_pounds(figures[key], scale)) for name, key in
+    bars = [(name, cash_amount(figures[key], scale)) for name, key in
             (("Actual", "actual"), ("Target", "target"), ("Prior year", "prior_year"))
             if figures[key] is not None]
     row, pad, name_w, value_w = Decimal(15), Decimal(2), Decimal(70), Decimal(50)
@@ -394,7 +426,7 @@ def _cash_chart(figures: dict, scale, width: Decimal) -> Drawing:
         left, right = _pt(x), _pt(x + length)
         drawing.add(Rect(left, _pt(middle) - 5, max(right - left, 1), 10, strokeColor=None,
                          fillColor=INK if i == 0 else BAR_LIGHT))
-        label = signed_money(value)
+        label = signed_money(value, currency)
         if value < 0:
             drawing.add(String(_pt(x) - 3, text_y, label, fontName="Helvetica", fontSize=7,
                                fillColor=GREY, textAnchor="end"))
@@ -426,7 +458,7 @@ def _effects(pack: Pack) -> Drawing:
 
 def _cash(pack: Pack) -> Drawing:
     return _cash_chart(pack.section(SectionType.CASH).figures, pack.cash_scale,
-                       Decimal(str(TEXT_W * 0.6)))
+                       Decimal(str(TEXT_W * 0.6)), pack.currency)
 
 
 @dataclass(frozen=True)
@@ -496,17 +528,43 @@ def _evidence(pack: Pack) -> list:
     return [Spacer(1, 4), row]
 
 
+_TILE_PAD = (8, 6)               # left and right padding inside a tile
+
+
+def tile_room(count: int = 4) -> float:
+    """The width a line of text has inside one of count tiles."""
+    return BODY_W / count - sum(_TILE_PAD)
+
+
+def tile_versus_size(tiles) -> float:
+    """
+    The type size for the tiles' comparison lines: 7.5pt, or smaller when the
+    longest would wrap ('CHF 128k (5.5%) above last year', or a yen pack's
+    '¥256.54m (5.5%) above last year'), so every line stays on one line.
+    """
+    lines = [text for t in tiles for text in (t.budget, t.last_year)]
+    room = tile_room(len(tiles))
+    for size in (7.5, 7, 6.5):
+        if all(stringWidth(text, _TILE_VERSUS.fontName, size) <= room for text in lines):
+            return size
+    return 6.5
+
+
 def _tiles(pack: Pack) -> Table:
     """Revenue, gross profit, gross margin and EBIT at a glance, from the P&L table's own figures."""
     tiles = headline_tiles(pack)
+    size = tile_versus_size(tiles)
+    versus = ParagraphStyle("tile_versus_fit", parent=_TILE_VERSUS, fontSize=size,
+                            leading=size + 1.5)
     cells = [[[_para(t.label, _TILE_LABEL), _para(t.value, _TILE_VALUE),
-               _para(t.budget, _TILE_VERSUS), _para(t.last_year, _TILE_VERSUS)] for t in tiles]]
+               _para(t.budget, versus), _para(t.last_year, versus)] for t in tiles]]
     table = Table(cells, colWidths=[BODY_W / len(tiles)] * len(tiles))
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), PANEL),
         ("LINEAFTER", (0, 0), (-2, -1), 4, colors.white),     # a gap between the tiles
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), _TILE_PAD[0]),
+        ("RIGHTPADDING", (0, 0), (-1, -1), _TILE_PAD[1]),
         ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
     ]))
     return table
@@ -519,7 +577,7 @@ def _kpi_table(pack: Pack) -> Table:
 
 
 def _cash_table(pack: Pack) -> Table:
-    rows = [list(CASH_HEADER[0]), list(CASH_HEADER[1]), ["Cash balance", *cash_cells(pack)]]
+    rows = [*(list(row) for row in cash_header(pack.currency)), ["Cash balance", *cash_cells(pack)]]
     return _simple_table(rows, header_rows=2)
 
 
@@ -590,7 +648,10 @@ def _governance(pack: Pack) -> list:
         + (f"KPIs {_short(pack.kpis_sha256)}." if pack.kpis_supplied
            else "KPIs not supplied (no KPI file)."),
         f"Code version: {pack.code_version or 'not recorded'}.",
-        f"Materiality: a variance against budget of £{table_value(flags.materiality_abs)} "
+        f"Currency: {CURRENCIES[pack.currency].name} ({pack.currency}), as in the source "
+        f"files; nothing is converted.",
+        f"Materiality: a variance against budget of "
+        f"{CURRENCIES[pack.currency].prefix}{table_value(flags.materiality_abs)} "
         f"or {pct(flags.materiality_pct)} or more, set by rule.",
         f"Commentary drafted by: {drafted}.",
         f"Edited at review: {', '.join(edited) if edited else 'none'}.",

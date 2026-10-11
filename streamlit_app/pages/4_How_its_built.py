@@ -125,8 +125,8 @@ st.markdown(
     soft +
     "- **KPI direction is unknown.** The KPI file does not say whether higher is better, so "
     "KPI differences are shown as plain differences, not Fav/(Adv).\n"
-    "- **One period, pounds only.** Each file holds one month, and every amount is read as "
-    "pounds sterling.\n"
+    "- **One period, one currency.** Each file holds one month, and every amount is read in "
+    "the one currency chosen for the run (GBP, EUR, USD, JPY or CHF); nothing is converted.\n"
     "- **The model adds little.** Once the figures, the selection and the attribution are "
     "computed, the model's wording adds little that the template does not. That is why the "
     "template is the default and the model an option.")

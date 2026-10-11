@@ -61,6 +61,20 @@ year". So the P&L table has a "Prior year" column and a "Fav/(Adv) vs prior
 year" group, while a sentence reads "£128k (5.5%) above last year". The input
 files' column is named `prior_year`.
 
+## Currency
+
+One currency per pack, chosen for the run: GBP (£), EUR (€), USD ($), JPY (¥)
+or CHF. Every amount is written in it, the sign before the number and commas
+for thousands: "€2.48m", "(€112k)", "CHF 2.48m". A currency whose sign the
+PDF's standard fonts cannot print is written with its ISO code, as CHF is.
+Nothing is converted. In prose the currency's name is plural: "stated in
+euros". The cash KPI is stated in "thousands" or "whole units".
+
+Retired: "pounds sterling only", "pounds only", "treated as pounds" and "a
+pound sign" for amounts in general. Pounds are named only for the Harmwell
+sample, which is in GBP. The command line still accepts `--cash-unit
+pounds`, published before v1.2.0, as `--cash-unit units`, with a note.
+
 ## Figures
 
 Table labels are "Revenue", "COGS", "Opex", "EBIT", "Gross profit" and

@@ -3,7 +3,7 @@
 # =============================================================================
 # "Run it yourself":
 #   1. Inputs (W3): the source (the sample, or your own P&L CSV and optional
-#      KPI CSV with the entity, period and cash unit), the materiality
+#      KPI CSV with the entity, period, currency and cash unit), the materiality
 #      thresholds, and the commentary (the template, or the model when a key
 #      is in the sidebar). "Build the draft" runs run_pipeline as a draft
 #      through lib/inputs.build_draft. The Pack stays in session state; only
@@ -45,13 +45,13 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from config import ENTITY_NAME, KPIS_PATH, PERIOD, PNL_PATH
+from config import CURRENCY, ENTITY_NAME, KPIS_PATH, PERIOD, PNL_PATH
 from src.pipeline import (
-    CASH_HEADER, DRIVERS_NOTE, DRIVERS_TITLE, KPI_HEADER, KPI_NOTE, SIGN_WORD, PackStatus,
-    PipelineError, SectionType, audit_text, cash_cells, cash_note, check_text,
-    commentary_source, drivers_rows, excluded_rows_note, headline_sentence, headline_tiles,
-    kpi_rows, parse_materiality, pnl_message, pnl_notes, pnl_rows, review_and_save,
-    screen_charts, signoff_summary, summary_line, walkthrough, when_text,
+    CURRENCIES, DRIVERS_NOTE, DRIVERS_TITLE, KPI_HEADER, KPI_NOTE, SIGN_WORD, PackStatus,
+    PipelineError, SectionType, audit_text, cash_cells, cash_header, cash_note, check_text,
+    commentary_source, drivers_header, drivers_rows, excluded_rows_note, headline_sentence,
+    headline_tiles, kpi_rows, parse_materiality, pnl_header, pnl_message, pnl_notes, pnl_rows,
+    review_and_save, screen_charts, signoff_summary, summary_line, walkthrough, when_text,
 )
 from streamlit_app.lib import claude_client
 from streamlit_app.lib.content import worked_example
@@ -77,6 +77,7 @@ BUILT_FROM, RUN_NOTES, CONFIRM_BUILD = "bp_built_from", "bp_run_notes", "bp_conf
 IN_SOURCE, IN_PNL, IN_KPIS = "in_source", "in_pnl", "in_kpis"
 IN_ENTITY, IN_PERIOD, IN_CASH = "in_entity", "in_period", "in_cash"
 IN_ABS, IN_PCT, IN_COMMENTARY = "in_abs", "in_pct", "in_commentary"
+IN_CURRENCY = "in_currency"
 KEY = "byo_api_key"                       # the sidebar key, read only to build the client
 
 
@@ -129,7 +130,7 @@ def _current_inputs() -> RunInputs:
         source=ss.get(IN_SOURCE, SAMPLE),
         pnl=_upload(IN_PNL), kpis=_upload(IN_KPIS),
         entity=ss.get(IN_ENTITY, ""), period=ss.get(IN_PERIOD, ""),
-        cash_unit=ss.get(IN_CASH, "thousands"),
+        currency=ss.get(IN_CURRENCY, CURRENCY), cash_unit=ss.get(IN_CASH, "thousands"),
         materiality_abs=ss.get(IN_ABS, DEFAULT_ABS), materiality_pct=ss.get(IN_PCT, DEFAULT_PCT),
         commentary=ss.get(IN_COMMENTARY, TEMPLATE),
     ).effective()
@@ -285,7 +286,7 @@ def _review_stage(pack, stale: bool = False) -> None:
     bridge.markdown(chart_html(charts["bridge"]), unsafe_allow_html=True)
     if drivers:
         beside.markdown(f'<p class="bp-chart-title">{html.escape(DRIVERS_TITLE)}</p>'
-                        + drivers_table_html(drivers)
+                        + drivers_table_html(drivers, drivers_header(pack.currency))
                         + f'<p class="bp-note">{html.escape(DRIVERS_NOTE)}</p>',
                         unsafe_allow_html=True)
 
@@ -301,14 +302,14 @@ def _review_stage(pack, stale: bool = False) -> None:
     if warning:
         st.warning(warning)
     st.markdown(chart_html(charts["effects"]), unsafe_allow_html=True)
-    st.markdown(pnl_table_html(pnl_rows(pack)), unsafe_allow_html=True)
+    st.markdown(pnl_table_html(pnl_rows(pack), pnl_header(pack.currency)), unsafe_allow_html=True)
     st.markdown("".join(f'<p class="bp-note">{html.escape(note)}</p>' for note in pnl_notes(pack)),
                 unsafe_allow_html=True)
     _section_box(pack, sections[SectionType.PNL], final)
 
     st.markdown("#### Cash")
     if "cash" in charts:
-        header = [f"{top} {unit}".strip() for top, unit in zip(*CASH_HEADER)]
+        header = [f"{top} {unit}".strip() for top, unit in zip(*cash_header(pack.currency))]
         st.markdown(chart_html(charts["cash"], title=False)
                     + table_html(header, [["Cash balance", *cash_cells(pack)]],
                                  numeric=(1, 2, 3, 4, 5), wrap=(0,))
@@ -404,10 +405,30 @@ def _worked_example() -> None:
 
 # -- The inputs ------------------------------------------------------------------
 
+def _form_currency() -> str:
+    """The currency a draft would be built in: the sample's, unless own files name another."""
+    if st.session_state.get(IN_SOURCE, SAMPLE) != OWN:
+        return CURRENCY
+    return st.session_state.get(IN_CURRENCY, CURRENCY)
+
+
+def _currency_changed() -> None:
+    """
+    A currency other than the sample's needs its own absolute threshold, so
+    the sample's default is cleared when one is chosen, and put back for
+    pounds if the box is empty. A threshold the person typed is left alone.
+    """
+    if _form_currency() != CURRENCY:
+        if st.session_state.get(IN_ABS) == DEFAULT_ABS:
+            st.session_state[IN_ABS] = ""
+    elif not st.session_state.get(IN_ABS, "").strip():
+        st.session_state[IN_ABS] = DEFAULT_ABS
+
+
 def _source_inputs() -> None:
     st.markdown("##### 1. Source")
     st.radio("Source", [SAMPLE, OWN], key=IN_SOURCE, horizontal=True,
-             label_visibility="collapsed")
+             label_visibility="collapsed", on_change=_currency_changed)
     if st.session_state.get(IN_SOURCE, SAMPLE) == SAMPLE:
         st.caption(f"The sample: {ENTITY_NAME}, {PERIOD}. Its KPI file states cash in thousands.")
         return
@@ -423,8 +444,15 @@ def _source_inputs() -> None:
     left, right = st.columns(2)
     left.text_input("Entity name (required)", key=IN_ENTITY, placeholder="e.g. Test Co Ltd")
     right.text_input("Period (required)", key=IN_PERIOD, placeholder="e.g. September 2026")
-    st.radio("Cash in the KPI file is stated in", list(CASH_CHOICES), key=IN_CASH,
-             format_func=CASH_CHOICES.get, horizontal=True)
+    left, right = st.columns(2)
+    left.selectbox("Currency", list(CURRENCIES), key=IN_CURRENCY,
+                   format_func=lambda code: CURRENCIES[code].label, on_change=_currency_changed,
+                   help="The currency your files are in. Every amount is written in it; "
+                        "nothing is converted.")
+    name = CURRENCIES[_form_currency()].name
+    right.radio("Cash in the KPI file is stated in", list(CASH_CHOICES), key=IN_CASH,
+                format_func=lambda unit: CASH_CHOICES[unit] if unit == "thousands"
+                else f"Whole {name}", horizontal=True)
     st.markdown("Start from the sample files:")
     left, right = st.columns(2)
     left.download_button("Sample P&L CSV", data=PNL_PATH.read_bytes(), file_name="pnl.csv",
@@ -432,18 +460,19 @@ def _source_inputs() -> None:
     right.download_button("Sample KPI CSV", data=KPIS_PATH.read_bytes(), file_name="kpis.csv",
                           mime="text/csv", key="in_dl_kpis", on_click="ignore")
     st.markdown(
-        '<p class="bp-note">Amounts are treated as pounds sterling. Your files are written '
-        "only to this session's own temporary folder on the server, read once to build the "
-        "pack, then deleted.</p>", unsafe_allow_html=True)
+        '<p class="bp-note">Amounts are written in the currency you choose; nothing is '
+        "converted. Your files are written only to this session's own temporary folder on "
+        "the server, read once to build the pack, then deleted.</p>", unsafe_allow_html=True)
 
 
 def _materiality_inputs() -> None:
     st.markdown("##### 2. Materiality")
     left, right = st.columns(2)
-    left.text_input("Absolute threshold (£)", key=IN_ABS)
+    currency = _form_currency()
+    left.text_input(f"Absolute threshold ({CURRENCIES[currency].sign})", key=IN_ABS)
     right.text_input("Percentage threshold (%)", key=IN_PCT)
     try:
-        parse_materiality(st.session_state[IN_ABS], st.session_state[IN_PCT])
+        parse_materiality(st.session_state[IN_ABS], st.session_state[IN_PCT], currency=currency)
     except PipelineError as exc:
         st.error(str(exc))
     st.caption("A line or subtotal is material when its variance against budget reaches "
@@ -467,7 +496,8 @@ def _commentary_inputs(has_key: bool) -> None:
 
 
 def _inputs(has_key: bool) -> None:
-    for key, value in ((IN_ABS, DEFAULT_ABS), (IN_PCT, DEFAULT_PCT), (IN_COMMENTARY, TEMPLATE)):
+    for key, value in ((IN_ABS, DEFAULT_ABS), (IN_PCT, DEFAULT_PCT), (IN_COMMENTARY, TEMPLATE),
+                       (IN_CURRENCY, CURRENCY)):
         st.session_state.setdefault(key, value)
     if not has_key:                        # no key, no model: the choice falls back
         st.session_state[IN_COMMENTARY] = TEMPLATE

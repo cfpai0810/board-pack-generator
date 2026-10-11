@@ -25,10 +25,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 
 from config import MATERIALITY_ABS, MATERIALITY_PCT
-from src.formatting import pct, profit_phrase, prose_money, table_value, when_text
+from src.formatting import CURRENCIES, pct, profit_phrase, prose_money, table_value, when_text
 from src.notes import and_join, count_words
 from src.state import REVIEWER_TEXT, SECTION_TITLES, Category, Pack, subtotal_key
-from src.step5_narrate import SYSTEM_PROMPT, build_prompt, narrative_facts, unmatched_tokens
+from src.step5_narrate import build_prompt, narrative_facts, unmatched_tokens
 from src.tables import LINE, pnl_rows
 
 _PARENT = {Category.REVENUE: "revenue", Category.COGS: "cogs", Category.OPEX: "opex"}
@@ -50,16 +50,17 @@ def headline(pack: Pack) -> dict[str, str]:
     return {
         "revenue_lines": (f"the {count_words(n)} revenue line sums" if n == 1
                           else f"the {count_words(n)} revenue lines sum"),
-        "revenue": prose_money(s.revenue_actual),
-        "ebit": profit_phrase(s.ebit_actual),
-        "ebit_budget": profit_phrase(s.ebit_budget, "budgeted "),
+        "revenue": prose_money(s.revenue_actual, pack.currency),
+        "ebit": profit_phrase(s.ebit_actual, pack.currency),
+        "ebit_budget": profit_phrase(s.ebit_budget, pack.currency, "budgeted "),
     }
 
 
 def thresholds(pack: Pack) -> tuple[str, str]:
     """The run's materiality thresholds as the pack prints them: ('£50,000', '10.0%')."""
     flags = pack.material_flags
-    return f"£{table_value(flags.materiality_abs)}", pct(flags.materiality_pct)
+    prefix = CURRENCIES[pack.currency].prefix
+    return f"{prefix}{table_value(flags.materiality_abs)}", pct(flags.materiality_pct)
 
 
 def default_threshold_inputs() -> tuple[str, str]:
@@ -194,11 +195,11 @@ def soft_check_example(pack: Pack) -> SoftCheckExample:
     passes: the page states the limitation from what the engine does.
     """
     budget = pack.subtotals.revenue_budget
-    precise = prose_money(budget)
+    precise = prose_money(budget, pack.currency)
     unit = precise[-2:] if precise.endswith("bn") else precise[-1]
     exponent = {"bn": 9, "m": 6, "k": 3}.get(unit, 0)
     whole = budget.copy_abs().scaleb(-exponent).quantize(Decimal(1), rounding=ROUND_HALF_UP)
-    coarse = f"£{whole}{unit if exponent else ''}"
+    coarse = f"{CURRENCIES[pack.currency].prefix}{whole}{unit if exponent else ''}"
     return SoftCheckExample(budget=precise, coarse=coarse,
                             flagged=bool(unmatched_tokens(f"The budget was {coarse}.", pack)))
 
@@ -207,7 +208,8 @@ def soft_check_example(pack: Pack) -> SoftCheckExample:
 
 def model_prompt(pack: Pack) -> tuple[str, str]:
     """(system prompt, user message): exactly what the model would receive for this pack."""
-    system, user = build_prompt(narrative_facts(pack), pack.entity, pack.period)
+    system, user = build_prompt(narrative_facts(pack), pack.entity, pack.period,
+                                currency=pack.currency)
     return system, user
 
 
@@ -248,5 +250,5 @@ __all__ = [
     "walkthrough",
     "headline", "thresholds", "default_threshold_inputs", "MaterialItem", "material_items",
     "placement_example", "FavAdvExample", "fav_adv_examples", "SoftCheckExample",
-    "soft_check_example", "model_prompt", "SYSTEM_PROMPT",
+    "soft_check_example", "model_prompt",
 ]

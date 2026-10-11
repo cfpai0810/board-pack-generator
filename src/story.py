@@ -36,15 +36,16 @@ from src.state import Category, Pack
 _ZERO = Decimal("0")
 
 
-def signed_money(value: Decimal) -> str:
+def signed_money(value: Decimal, currency: str) -> str:
     """A profit effect or a result in the prose scale, brackets for a negative: '(£112k)', '£3k'."""
-    return f"({prose_money(value)})" if value < 0 else prose_money(value)
+    return f"({prose_money(value, currency)})" if value < 0 else prose_money(value, currency)
 
 
 _LEVEL = {"budget": "on budget", "last year": "level with last year"}
 
 
-def against(variance: Decimal, comparator: str, percent: Optional[Decimal] = None) -> str:
+def against(variance: Decimal, comparator: str, percent: Optional[Decimal] = None, *,
+            currency: str) -> str:
     """
     A variance in the words the commentary uses: '£112k (4.3%) below budget',
     '£128k (5.5%) above last year', 'on budget'. percent is left out when it
@@ -53,7 +54,8 @@ def against(variance: Decimal, comparator: str, percent: Optional[Decimal] = Non
     if variance == 0:
         return _LEVEL[comparator]
     share = f" ({pct(percent)})" if percent is not None else ""
-    return f"{prose_money(variance)}{share} {'below' if variance < 0 else 'above'} {comparator}"
+    return (f"{prose_money(variance, currency)}{share} "
+            f"{'below' if variance < 0 else 'above'} {comparator}")
 
 
 def points_against(points: Optional[Decimal], comparator: str) -> str:
@@ -81,10 +83,10 @@ def headline_sentence(pack: Pack) -> str:
     The bottom line against both comparators: 'EBIT was a loss of £46k: £193k
     below budget and £147k below last year.'
     """
-    s = pack.subtotals
-    return (f"EBIT was {profit_phrase(s.ebit_actual)}: "
-            f"{against(s.ebit_var_budget_abs, 'budget')} and "
-            f"{against(s.ebit_var_py_abs, 'last year')}.")
+    s, c = pack.subtotals, pack.currency
+    return (f"EBIT was {profit_phrase(s.ebit_actual, c)}: "
+            f"{against(s.ebit_var_budget_abs, 'budget', currency=c)} and "
+            f"{against(s.ebit_var_py_abs, 'last year', currency=c)}.")
 
 
 def summary_line(pack: Pack) -> str:
@@ -101,7 +103,8 @@ def summary_line(pack: Pack) -> str:
     def moved(name: str, variance: Decimal, verb: str = "") -> str:
         if not variance:
             return f"{name} {verb}on budget"
-        return f"{name} {verb}{prose_money(variance)} {'lower' if variance < 0 else 'higher'}"
+        return (f"{name} {verb}{prose_money(variance, pack.currency)} "
+                f"{'lower' if variance < 0 else 'higher'}")
 
     parts = [moved("revenue", s.revenue_var_budget_abs, "was "),
              moved("COGS", s.cogs_var_budget_abs), moved("opex", s.opex_var_budget_abs)]
@@ -115,7 +118,8 @@ def summary_line(pack: Pack) -> str:
     revenue = s.revenue_var_py_abs
     share = meaningful(s.revenue_var_py_pct, s.revenue_actual, s.revenue_py)
     if revenue:
-        grew = (f"revenue {'grew' if revenue > 0 else 'fell'} by {prose_money(revenue)}"
+        grew = (f"revenue {'grew' if revenue > 0 else 'fell'} by "
+                f"{prose_money(revenue, pack.currency)}"
                 + (f" ({pct(share)})" if share is not None else ""))
     else:
         grew = "revenue was level"
@@ -198,14 +202,15 @@ def pnl_message(pack: Pack) -> str:
     'Revenue was £112k (4.3%) below budget, with all three revenue lines
     below budget; COGS was £34k above budget and opex £47k above.'
     """
-    s = pack.subtotals
+    s, c = pack.subtotals, pack.currency
     revenue = [l for l in pack.pnl_lines if l.category is Category.REVENUE]
     below = sum(1 for l in revenue if l.var_budget_abs < 0)
     rev = s.revenue_var_budget_abs
     if rev and s.revenue_var_budget_pct is not None:
-        text = f"Revenue was {prose_money(rev)} ({pct(s.revenue_var_budget_pct)}) {_against(rev)}"
+        text = (f"Revenue was {prose_money(rev, c)} ({pct(s.revenue_var_budget_pct)}) "
+                f"{_against(rev)}")
     else:
-        text = f"Revenue was {'on budget' if not rev else prose_money(rev) + ' ' + _against(rev)}"
+        text = f"Revenue was {'on budget' if not rev else prose_money(rev, c) + ' ' + _against(rev)}"
     if revenue and rev < 0:
         if below == len(revenue):
             which = "the revenue line" if below == 1 else f"all {count_words(below)} revenue lines"
@@ -213,7 +218,7 @@ def pnl_message(pack: Pack) -> str:
             which = f"{count_words(below)} of the {count_words(len(revenue))} revenue lines"
         text += f", with {which} below budget" if below else ""
     cogs, opex = s.cogs_var_budget_abs, s.opex_var_budget_abs
-    costs = (f"COGS was {prose_money(cogs)} {_against(cogs)}" if cogs else "COGS was on budget")
-    costs += (f" and opex {prose_money(opex)} {_against(opex).removesuffix(' budget')}"
+    costs = (f"COGS was {prose_money(cogs, c)} {_against(cogs)}" if cogs else "COGS was on budget")
+    costs += (f" and opex {prose_money(opex, c)} {_against(opex).removesuffix(' budget')}"
               if opex else " and opex on budget")
     return f"{text}; {costs}."

@@ -541,7 +541,7 @@ class TestOwnFiles:
             assert stale not in text and stale not in page, stale
 
     def test_cash_stated_in_pounds(self):
-        at = _own(_app(BOARD).run(), kpis=POUNDS_KPIS, cash="pounds")
+        at = _own(_app(BOARD).run(), kpis=POUNDS_KPIS, cash="units")
         cash = at.text_area(key="bp_edit_cash").value
         assert "£1.18m" in cash and "bn" not in cash
 
@@ -627,7 +627,7 @@ class TestOwnFiles:
     def test_the_page_says_what_happens_to_the_files(self):
         at = _own(_app(BOARD).run(), build=False)
         text = _text(at)
-        assert "Amounts are treated as pounds sterling." in text
+        assert "Amounts are written in the currency you choose; nothing is converted." in text
         assert ("Your files are written only to this session's own temporary folder on "
                 "the server, read once to build the pack, then deleted." in text)
         assert [d.proto.label for d in _downloads(at)] == [
@@ -829,7 +829,7 @@ def _sample_figures() -> set[str]:
               if getattr(pack.subtotals, f) is not None]
     for line in pack.pnl_lines:
         values += [line.actuals, line.budget, line.prior_year, line.var_budget_abs, line.var_py_abs]
-    figures |= {prose_money(v) for v in values if abs(v) >= 1000}
+    figures |= {prose_money(v, "GBP") for v in values if abs(v) >= 1000}
     figures |= {table_value(v) for v in values}
     for kpi in pack.kpis:
         figures |= {table_number(v) for v in (kpi.actual, kpi.target, kpi.prior_year,
@@ -979,3 +979,48 @@ class TestWorkedExampleTab:
         example = worked_example()
         assert example["pdf"] == next(worked.glob("*.pdf")).read_bytes()
         assert example["audit_text"] == (worked / "audit.jsonl").read_text(encoding="utf-8")
+
+
+# ── CURRENCY: CHOSEN ON THE FORM, WITH ITS OWN THRESHOLD ───────────────
+
+class TestCurrencyChoice:
+    def _in_euros(self):
+        at = _own(_app(BOARD).run(), build=False)
+        at.selectbox(key="in_currency").set_value("EUR").run()
+        return at
+
+    def test_another_currency_clears_the_default_and_asks_for_a_threshold(self):
+        at = self._in_euros()
+        assert at.text_input(key="in_abs").value == ""
+        assert at.text_input(key="in_abs").label == "Absolute threshold (€)"
+        assert [e.value for e in at.error] == [
+            "Give the absolute threshold in euros. The default, 50,000, is set for the sample "
+            "in pounds and does not carry over to another currency."]
+        at.button(key="bp_run").click().run()
+        assert "bp_pack" not in at.session_state or at.session_state["bp_pack"] is None
+        assert "Give the absolute threshold in euros." in _text(at)
+
+    def test_the_review_screen_is_written_in_that_currency(self):
+        at = self._in_euros()
+        at.text_input(key="in_abs").input("45,000").run()
+        at.button(key="bp_run").click().run()
+        assert not at.exception, at.exception
+        pack = at.session_state["bp_pack"]
+        assert pack.currency == "EUR"
+        md = _markdown(at)
+        review = md[md.index("Executive summary"):]
+        assert "€2.48m" in review and "£" not in review
+
+    def test_pounds_bring_the_default_back_and_a_typed_threshold_stays(self):
+        at = self._in_euros()
+        at.selectbox(key="in_currency").set_value("GBP").run()
+        assert at.text_input(key="in_abs").value == "50,000"
+        at.text_input(key="in_abs").input("30,000").run()
+        at.selectbox(key="in_currency").set_value("USD").run()
+        assert at.text_input(key="in_abs").value == "30,000"
+
+    def test_the_sample_is_in_pounds_whatever_the_form_says(self):
+        from streamlit_app.lib.inputs import OWN, SAMPLE, RunInputs
+        chosen = RunInputs(source=OWN, currency="JPY")
+        assert chosen.effective().currency == "JPY"
+        assert RunInputs(source=SAMPLE, currency="JPY").effective().currency == "GBP"

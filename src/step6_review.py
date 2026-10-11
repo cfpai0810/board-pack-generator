@@ -322,6 +322,7 @@ def audit_record(pack: Pack, *, run_id: str, timestamp: str, reviewer: str,
         "code_version": pack.code_version,
         "entity": pack.entity,
         "period": pack.period,
+        "currency": pack.currency,
         "status": pack.status.value,
         "inputs": {
             "pnl_sha256": pack.pnl_sha256,

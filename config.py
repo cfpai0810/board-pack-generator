@@ -22,8 +22,9 @@ OUTPUT_DIR = ROOT / "output"
 
 # -- Materiality thresholds ---------------------------------------------------
 # A variance is material if |abs vBud| >= TA OR |% vBud| >= TP.
-# TA is tuned to the sample's revenue scale (~2.5M); a materially different
-# scale wants a different TA. TP scales with the company.
+# TA is tuned to the sample's revenue scale (~2.5M) in pounds; a materially
+# different scale wants a different TA, and a run in another currency must give
+# its own (pipeline checks). TP scales with the company.
 
 MATERIALITY_ABS = Decimal("50000")       # TA: absolute threshold
 MATERIALITY_PCT = Decimal("10")          # TP: percentage threshold
@@ -41,8 +42,8 @@ MARGIN_DP = 1                            # gross margin shown to 1 decimal place
 GROSS_MARGIN_KPI_METRIC = "Gross margin (%)"
 CASH_KPI_METRIC = "Cash balance (GBP 000s)"
 
-# The cash KPI is stated in thousands; prose converts it to pounds before
-# formatting, so the raw thousands figure never reaches a sentence.
+# The sample's cash KPI is stated in thousands; prose converts it to whole units
+# before formatting, so the raw thousands figure never reaches a sentence.
 CASH_KPI_SCALE = 1000
 
 # -- The model (step5, only when a client is injected) ------------------------
@@ -81,7 +82,7 @@ DIRECTION_PHRASES = (
 # the project is a git repository; otherwise this constant. Bump it whenever
 # a change could alter a figure or the commentary from the same inputs.
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 # -- The repository -------------------------------------------------------------
 
@@ -91,3 +92,4 @@ REPO_URL = "https://github.com/cfpai0810/board-pack-generator"
 
 ENTITY_NAME = "Harmwell Foods Ltd"
 PERIOD = "June 2026"
+CURRENCY = "GBP"          # the sample's currency; a run may choose another (formatting.CURRENCIES)

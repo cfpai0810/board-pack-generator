@@ -1206,14 +1206,14 @@ class TestFormatting:
     ])
     def test_prose_money(self, value, expected):
         from src.formatting import prose_money
-        assert prose_money(Decimal(value)) == expected
+        assert prose_money(Decimal(value), "GBP") == expected
 
     def test_cash_is_converted_by_the_runs_scale(self):
         from src.formatting import prose_cash
-        assert prose_cash(Decimal("1176"), 1000) == "£1.18m"
-        assert prose_cash(Decimal("-174"), 1000) == "£174k"
-        assert prose_cash(Decimal("1176000"), 1) == "£1.18m"
-        assert prose_cash(Decimal("1176000"), 1000) == "£1.18bn"     # why the scale is an input
+        assert prose_cash(Decimal("1176"), 1000, "GBP") == "£1.18m"
+        assert prose_cash(Decimal("-174"), 1000, "GBP") == "£174k"
+        assert prose_cash(Decimal("1176000"), 1, "GBP") == "£1.18m"
+        assert prose_cash(Decimal("1176000"), 1000, "GBP") == "£1.18bn"     # why the scale is an input
 
     @pytest.mark.parametrize("value, signed, expected", [
         ("-0.0004", False, "0.0%"), ("-0.0004", True, "0.0%"), ("-4.3416", False, "4.3%"),
@@ -1231,8 +1231,8 @@ class TestFormatting:
 
     def test_profit_phrase(self):
         from src.formatting import profit_phrase
-        assert profit_phrase(Decimal("-46120")) == "a loss of £46k"
-        assert profit_phrase(Decimal("147000"), "budgeted ") == "a budgeted profit of £147k"
+        assert profit_phrase(Decimal("-46120"), "GBP") == "a loss of £46k"
+        assert profit_phrase(Decimal("147000"), "GBP", "budgeted ") == "a budgeted profit of £147k"
 
     @pytest.mark.parametrize("value, places, expected", [
         ("-112450", 0, "below budget"),
@@ -1336,7 +1336,7 @@ class TestNarrateTemplate:
     def test_kpi_units_reach_the_prompt_too(self):
         from src.step5_narrate import build_prompt, narrative_facts
         p = _assemble_sample()
-        _, user = build_prompt(narrative_facts(p), p.entity, p.period)
+        _, user = build_prompt(narrative_facts(p), p.entity, p.period, currency=p.currency)
         assert "DSO: 48 days; 6 days above target; 3 days above last year." in user
 
     def test_cash_in_pounds(self, narrated):
@@ -1464,7 +1464,7 @@ class TestNarrateModel:
 
     def test_request_shape(self):
         from config import NARRATIVE_EFFORT, NARRATIVE_MODEL
-        from src.step5_narrate import SYSTEM_PROMPT, build_prompt, narrative_facts
+        from src.step5_narrate import build_prompt, narrative_facts, system_prompt
         client = FakeClient(json.dumps(MODEL_SECTIONS))
         p = self._run(client)
         (call,) = client.calls
@@ -1474,8 +1474,8 @@ class TestNarrateModel:
         assert call["output_config"]["effort"] == NARRATIVE_EFFORT
         schema = call["output_config"]["format"]["schema"]
         assert schema["required"] == ["exec_summary", "pnl", "kpis", "cash"]
-        assert call["system"] == SYSTEM_PROMPT
-        _, user = build_prompt(narrative_facts(p), p.entity, p.period)
+        assert call["system"] == system_prompt("GBP")
+        _, user = build_prompt(narrative_facts(p), p.entity, p.period, currency=p.currency)
         assert call["messages"] == [{"role": "user", "content": user}]
 
     def test_raising_client_falls_back_with_a_warning(self):
@@ -1526,7 +1526,7 @@ class TestNarrateModel:
     def _prompt(self):
         from src.step5_narrate import build_prompt, narrative_facts
         p = _assemble_sample()
-        system, user = build_prompt(narrative_facts(p), p.entity, p.period)
+        system, user = build_prompt(narrative_facts(p), p.entity, p.period, currency=p.currency)
         return p, system, user
 
     def test_prompt_carries_no_raw_figures(self):
@@ -1656,7 +1656,7 @@ class TestNarrativeSafeguards:
     def test_prompt_carries_no_drivers(self):
         from src.step5_narrate import build_prompt, narrative_facts
         p = _assemble_sample()
-        system, user = build_prompt(narrative_facts(p), p.entity, p.period)
+        system, user = build_prompt(narrative_facts(p), p.entity, p.period, currency=p.currency)
         assert "Drivers" not in user and "Ingredients" not in user
         assert "Lines that" not in user and "offset" not in user
         assert ("2. Say what moved and by how much. Do not say which lines drove a "
@@ -2617,7 +2617,7 @@ class TestCliOwnFiles:
         pnl = tmp_path / "pnl.csv"
         pnl.write_bytes(PNL_PATH.read_bytes())
         code, out = _main(["--pnl", str(pnl), "--kpis", str(kpis), "--entity", "Test Co",
-                           "--period", "September 2026", "--cash-unit", "pounds",
+                           "--period", "September 2026", "--cash-unit", "units",
                            "--draft-only", "--output", str(tmp_path / "o")])
         assert code == 0 and "Data notes: none" in out
         (pdf,) = (tmp_path / "o").glob("*.pdf")
@@ -2935,8 +2935,8 @@ class TestOwnData:
 
     def test_the_cash_scale_must_be_a_known_unit(self, tmp_path):
         from src.pipeline import CASH_UNITS, PipelineError
-        assert CASH_UNITS == {"thousands": 1000, "pounds": 1}
-        with pytest.raises(PipelineError, match="thousands or in pounds"):
+        assert CASH_UNITS == {"thousands": 1000, "units": 1}
+        with pytest.raises(PipelineError, match="thousands or in whole units"):
             _own_run(tmp_path, cash_scale=100)
 
     # -- no KPI file ----------------------------------------------------------
@@ -2964,7 +2964,7 @@ class TestOwnData:
 
     def test_45k_puts_opex_in_the_executive_summary(self, tmp_path):
         from src.pipeline import parse_materiality
-        abs_, pct_ = parse_materiality("45,000", "10")
+        abs_, pct_ = parse_materiality("45,000", "10", currency="GBP")
         pack = _own_run(tmp_path, materiality_abs=abs_, materiality_pct=pct_).pack
         assert "Opex" in _names(pack, pack.material_flags.exec_summary_items)
         default = _own_run(tmp_path / "default").pack
@@ -2975,7 +2975,8 @@ class TestOwnData:
         (" 45,000 ", " 7.5 ", ("45000", "7.5")), ("1", "100", ("1", "100"))])
     def test_parse_materiality(self, abs_text, pct_text, expected):
         from src.pipeline import parse_materiality
-        assert parse_materiality(abs_text, pct_text) == tuple(Decimal(v) for v in expected)
+        assert parse_materiality(abs_text, pct_text, currency="GBP") == tuple(
+            Decimal(v) for v in expected)
 
     @pytest.mark.parametrize("abs_text, pct_text, says", [
         ("0", "10", "absolute"), ("-5000", "10", "absolute"), ("fifty", "10", "absolute"),
@@ -2985,7 +2986,7 @@ class TestOwnData:
     def test_parse_materiality_refuses(self, abs_text, pct_text, says):
         from src.pipeline import PipelineError, parse_materiality
         with pytest.raises(PipelineError, match=f"The {says} threshold"):
-            parse_materiality(abs_text, pct_text)
+            parse_materiality(abs_text, pct_text, currency="GBP")
 
     @pytest.mark.parametrize("thresholds", [
         {"materiality_abs": Decimal("0")}, {"materiality_pct": Decimal("100.5")}])
@@ -3334,7 +3335,7 @@ class TestCashUnitGuards:
         from src.pipeline import signoff_summary
         result = _own_run(tmp_path, cash_scale=1)
         hint = ("Cash: the KPI name 'Cash balance (GBP 000s)' suggests thousands, but cash "
-                "was read as pounds. Check the unit chosen for cash.")
+                "was read as whole pounds. Check the unit chosen for cash.")
         assert result.data_notes == [hint]
         assert self._kinds(result) == ["cash_unit_hint"]
         assert hint in signoff_summary(result.pack, {})
@@ -3352,7 +3353,7 @@ class TestCashUnitGuards:
         result = _own_run(tmp_path, kpis=self._kpis(tmp_path, "Cash balance (GBP)"),
                           cash_scale=1000)
         assert self._kinds(result) == ["cash_unit_hint", "cash_vs_revenue"]
-        assert "suggests pounds, but cash was read as thousands" in result.data_notes[0]
+        assert "suggests whole pounds, but cash was read as thousands" in result.data_notes[0]
 
     def test_the_same_file_read_correctly_raises_neither(self, tmp_path):
         result = _own_run(tmp_path, kpis=self._kpis(tmp_path, "Cash balance (GBP)"),
@@ -3373,7 +3374,7 @@ class TestCashUnitGuards:
         from src.state import Subtotals
         cash = Kpi(metric="Cash balance", actual=Decimal("1176000"), target=Decimal("1"))
         s = Subtotals(revenue_actual=Decimal("0"))
-        assert cash_unit_notes([cash], s, 1000) == []
+        assert cash_unit_notes([cash], s, 1000, "GBP") == []
 
 
 # ── W4: THE WORKED EXAMPLE, AS COMMITTED ──────────────────────────────
@@ -3687,10 +3688,10 @@ class TestNegativeCash:
 
     def test_the_phrase(self):
         from src.formatting import cash_balance_phrase
-        assert cash_balance_phrase(Decimal("1176"), 1000) == "£1.18m"
-        assert cash_balance_phrase(Decimal("-120"), 1000) == "an overdraft of £120k"
-        assert cash_balance_phrase(Decimal("-120000"), 1) == "an overdraft of £120k"
-        assert cash_balance_phrase(Decimal("0"), 1000) == "£0"
+        assert cash_balance_phrase(Decimal("1176"), 1000, "GBP") == "£1.18m"
+        assert cash_balance_phrase(Decimal("-120"), 1000, "GBP") == "an overdraft of £120k"
+        assert cash_balance_phrase(Decimal("-120000"), 1, "GBP") == "an overdraft of £120k"
+        assert cash_balance_phrase(Decimal("0"), 1000, "GBP") == "£0"
 
     def test_the_template_sentence_keeps_the_sign(self, overdrawn):
         assert overdrawn.section(SectionType.CASH).narrative == (
@@ -3700,7 +3701,8 @@ class TestNegativeCash:
 
     def test_the_model_is_told_it_is_an_overdraft(self, overdrawn):
         from src.step5_narrate import build_prompt, narrative_facts
-        _, user = build_prompt(narrative_facts(overdrawn), overdrawn.entity, overdrawn.period)
+        _, user = build_prompt(narrative_facts(overdrawn), overdrawn.entity, overdrawn.period,
+                               currency=overdrawn.currency)
         assert "Cash balance: an overdraft of £120k; £420k below target; £370k below last year." in user
 
 
@@ -3772,6 +3774,8 @@ RETIRED = {
         r"\bClaude\b(?!, via the Anthropic API)",
     "a typed model id (it comes from config)": r"claude-(sonnet|opus|haiku|fable)-\d",
     "finance team (say the reviewer)": r"\bfinance team\b",
+    "pounds only (one currency is chosen per run)":
+        r"(?i)\bpounds sterling\b|\bpounds only\b|\b(treated|read) as pounds\b|\ba pound sign\b",
 }
 ALLOWED = ("A. Controller", "AI Variance Commentary Engine", "AI Governance Playbook",
            "Planning-to-Warehouse-to-LLM Pipeline")
@@ -3876,3 +3880,263 @@ class TestGlossary:
         pieces = [text for _, text in _reader_text(path)
                   if not text.lstrip().startswith("#") or path.suffix == ".md"]
         assert _first_mention_says_what_it_is(" ".join(pieces))
+
+
+# ── CURRENCY: ONE PER PACK, CHOSEN FOR THE RUN, NEVER CONVERTED ─────────
+
+# The sample's revenue in each currency, and the sign each one writes.
+REVENUE_IN = {"GBP": "£2.48m", "EUR": "€2.48m", "USD": "$2.48m", "JPY": "¥2.48m",
+              "CHF": "CHF 2.48m"}
+SIGNS = {"GBP": "£", "EUR": "€", "USD": "$", "JPY": "¥", "CHF": "CHF"}
+OWN_REASON = " Two retail customers moved their orders into July."
+
+
+@pytest.fixture(scope="module")
+def signed_in(tmp_path_factory):
+    """The sample signed in each currency: the pack, its PDF text, and its review audit line."""
+    from src.step7_render import render
+    found = {}
+    for code in REVENUE_IN:
+        folder = tmp_path_factory.mktemp(code.lower())
+        pack = _run_review(_narrated_sample(currency=code),
+                           Script({"Executive summary": lambda t: t + OWN_REASON}), folder)
+        review_line = next(l for l in _audit_lines(folder) if l["event"] == "review")
+        found[code] = (pack, _flat(_pdf_pages(render(pack))), review_line)
+    return found
+
+
+def _screen_text(pack) -> str:
+    """Everything the review screen shows that the engine writes, charts and notes included."""
+    from src.pipeline import (
+        cash_cells, cash_header, cash_note, drivers_header, headline_sentence, headline_tiles,
+        pnl_header, pnl_message, pnl_notes, screen_charts, summary_line,
+    )
+    parts = [headline_sentence(pack), summary_line(pack), pnl_message(pack), cash_note(pack)]
+    parts += [text for t in headline_tiles(pack) for text in (t.value, t.budget, t.last_year)]
+    parts += [c.svg for c in screen_charts(pack).values()] + pnl_notes(pack)
+    parts += [cell for header in (pnl_header(pack.currency), drivers_header(pack.currency),
+                                  cash_header(pack.currency)) for row in header for cell in row]
+    parts += list(cash_cells(pack)) + [s.narrative for s in pack.sections] + list(pack.warnings)
+    return " ".join(parts)
+
+
+class TestCurrency:
+    @pytest.mark.parametrize("code", list(REVENUE_IN))
+    def test_every_amount_is_written_in_the_packs_currency(self, signed_in, code):
+        from src.formatting import CURRENCIES
+        pack, pdf, review_line = signed_in[code]
+        screen = _screen_text(pack)
+        for text in (pdf, screen):
+            assert REVENUE_IN[code] in text
+            others = [s for c, s in SIGNS.items() if c != code and s in text]
+            assert others == [], others
+        assert (f"Currency: {CURRENCIES[code].name} ({code}), as in the source files; nothing "
+                f"is converted.") in pdf
+        assert review_line["currency"] == code
+
+    @pytest.mark.parametrize("code", list(REVENUE_IN))
+    def test_the_numeric_check_raises_no_flag_in_any_currency(self, signed_in, code):
+        from src.step5_narrate import unmatched_tokens
+        from src.story import headline_sentence, pnl_message, summary_line
+        pack = signed_in[code][0]
+        assert pack.numeric_warnings == []
+        for text in (headline_sentence(pack), summary_line(pack), pnl_message(pack)):
+            assert unmatched_tokens(text, pack) == []
+
+    def test_an_amount_in_another_currency_is_flagged(self, signed_in):
+        from src.step5_narrate import unmatched_tokens
+        pack = signed_in["EUR"][0]
+        assert unmatched_tokens("Revenue was €2.48m.", pack) == []
+        assert unmatched_tokens("Revenue was $2.48m, or £2.48m.", pack) == ["$2.48m", "£2.48m"]
+        assert unmatched_tokens("Revenue was CHF 2.48m.", signed_in["CHF"][0]) == []
+
+    def test_the_formatter_writes_each_currency(self):
+        from src.formatting import CURRENCIES, prose_money, profit_phrase, unprintable
+        from src.story import signed_money
+        from src.tables import drivers_header, pnl_header
+        assert [prose_money(Decimal("2477550"), c) for c in REVENUE_IN] == list(REVENUE_IN.values())
+        assert profit_phrase(Decimal("-46120"), "CHF") == "a loss of CHF 46k"
+        assert signed_money(Decimal("-112450"), "EUR") == "(€112k)"
+        assert pnl_header("JPY")[1] == ("", "¥", "¥", "¥", "¥", "%", "¥", "%")
+        assert drivers_header("CHF")[1][2] == "Fav/(Adv) CHF"
+        assert [c.label for c in CURRENCIES.values()] == [
+            "GBP (£)", "EUR (€)", "USD ($)", "JPY (¥)", "CHF"]
+        assert unprintable("".join(c.prefix for c in CURRENCIES.values())) == []
+
+    def test_the_model_is_told_the_currency(self, signed_in):
+        from src.step5_narrate import build_prompt, narrative_facts
+        pack = signed_in["EUR"][0]
+        system, user = build_prompt(narrative_facts(pack), pack.entity, pack.period,
+                                    currency=pack.currency)
+        assert 'for example "€112k"' in system and "£" not in system + user
+        assert user.startswith("Pack: Harmwell Foods Ltd, June 2026. Amounts are in euros.")
+
+    def test_another_currency_needs_its_own_threshold(self, tmp_path):
+        from src.pipeline import PipelineError, parse_materiality
+        asked = ("Give the absolute threshold in euros. The default, 50,000, is set for the "
+                 "sample in pounds and does not carry over to another currency.")
+        with pytest.raises(PipelineError) as raised:
+            _own_run(tmp_path, currency="EUR")
+        assert str(raised.value) == asked
+        with pytest.raises(PipelineError) as raised:
+            parse_materiality("", "10", currency="EUR")
+        assert str(raised.value) == asked
+        assert parse_materiality("€45,000", "10", currency="EUR") == (Decimal("45000"), Decimal("10"))
+        assert parse_materiality("CHF 45,000", "10%", currency="CHF") == (Decimal("45000"),
+                                                                         Decimal("10"))
+        with pytest.raises(PipelineError, match="positive amount in pounds"):
+            parse_materiality("", "10", currency="GBP")
+        result = _own_run(tmp_path, currency="EUR", materiality_abs=Decimal("45000"))
+        assert result.pack.currency == "EUR"
+        assert "€45,000" in _flat(_pdf_pages(result.pdf_path.read_bytes()))
+
+    def test_an_unknown_currency_is_refused(self, tmp_path):
+        from src.pipeline import PipelineError
+        with pytest.raises(PipelineError, match="must be one of GBP, EUR, USD, JPY, CHF; 'AUD'"):
+            _own_run(tmp_path, currency="AUD", materiality_abs=Decimal("45000"))
+
+    def test_a_cash_kpi_named_in_another_currency_is_noted(self, tmp_path):
+        path = tmp_path / "kpis.csv"
+        _write_csv(path, KPI_HEADER, [["Headcount", "214", "205", "198"],
+                                      ["Cash balance (USD 000s)", "1176", "1350", "1288"]])
+        result = _own_run(tmp_path, kpis=path, currency="EUR", materiality_abs=Decimal("45000"))
+        assert result.data_notes == [
+            "Cash: the KPI name 'Cash balance (USD 000s)' suggests US dollars, but the pack is "
+            "in euros. Check the currency chosen for the run."]
+        assert [n.kind for n in result.data_notes] == ["cash_currency_hint"]
+        assert "Converted to euros from the KPI file" in _flat(_pdf_pages(result.pdf_path.read_bytes()))
+
+    def test_the_cash_unit_and_currency_are_read_from_any_name(self):
+        from src.step4_assemble import currency_hint, unit_hint
+        assert [unit_hint(f"Cash balance ({u})") for u in
+                ("EUR 000s", "€k", "CHF k", "$", "JPY", "Swiss francs", "kg")] == [
+                    1000, 1000, 1000, 1, 1, 1, None]
+        assert [currency_hint(f"Cash balance ({u})") for u in
+                ("GBP 000s", "$000", "€k", "yen", "CHF", "thousands")] == [
+                    "GBP", "USD", "EUR", "JPY", "CHF", None]
+        assert currency_hint("Cash balance") is None
+
+    def test_amounts_may_carry_any_of_the_signs_or_codes(self):
+        from src.step1_load import _parse_amount
+        assert [_parse_amount(t) for t in ("CHF 1,234", "€(1,234)", "usd 5", "¥1,000", "JPY 7")] == [
+            Decimal("1234"), Decimal("-1234"), Decimal("5"), Decimal("1000"), Decimal("7")]
+
+    def test_the_cli_takes_a_currency_and_asks_for_a_threshold(self, tmp_path):
+        code, out = _main(["--draft-only", "--currency", "EUR", "--output", str(tmp_path)])
+        assert code == 2 and "Give the absolute threshold in euros." in out
+        code, out = _main(["--draft-only", "--currency", "EUR", "--materiality-abs", "45000",
+                           "--output", str(tmp_path)])
+        assert code == 0
+        text = _flat(_pdf_pages(next(tmp_path.glob("*_DRAFT.pdf")).read_bytes()))
+        assert "Revenue €2.48m" in text and "£" not in text
+
+
+# ── FIT: LONG FIGURES STAY INSIDE THEIR COLUMNS, TILES AND CHARTS ────────
+
+def _scaled_pnl(tmp_path, scale: int) -> Path:
+    """The sample P&L in yen at scale times its size: 190 gives revenue near 470 million."""
+    from config import PNL_PATH
+    rows = _sample_rows(PNL_PATH)
+    path = tmp_path / f"jpy_x{scale}.csv"
+    _write_csv(path, rows[0], [r[:2] + [str(int(Decimal(v) * scale)) for v in r[2:]]
+                               for r in rows[1:]])
+    return path
+
+
+def _label_boxes(drawing):
+    """(left, right, bottom, top, text) of every label in a chart, as reportlab will draw it."""
+    from reportlab.graphics.shapes import String
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    found = []
+    for s in drawing.contents:
+        if isinstance(s, String):
+            width = stringWidth(s.text, s.fontName, s.fontSize)
+            left = s.x - {"end": width, "middle": width / 2}.get(s.textAnchor, 0)
+            found.append((left, left + width, s.y, s.y + 0.72 * s.fontSize, s.text))
+    return found
+
+
+def _clashes(drawing) -> list:
+    """Labels that run off the chart, and pairs of labels that overlap."""
+    boxes = _label_boxes(drawing)
+    found = [t for left, right, _, _, t in boxes if left < -0.5 or right > drawing.width + 0.5]
+    for i, a in enumerate(boxes):
+        found += [(a[4], b[4]) for b in boxes[i + 1:]
+                  if a[0] < b[1] and b[0] < a[1] and a[2] < b[3] and b[2] < a[3]]
+    return found
+
+
+def _misfits(pack) -> list:
+    """Every chart label, tile line and P&L cell that would not fit, for one pack."""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    from src import step7_render as r
+    from src.tables import headline_tiles, pnl_header, pnl_rows
+    found = [(name, clash) for name, chart in (("bridge", r._bridge(pack)),
+                                               ("effects", r._effects(pack)))
+             for clash in _clashes(chart)]
+    if pack.section(SectionType.CASH).figures["supplied"]:
+        found += [("cash", clash) for clash in _clashes(r._cash(pack))]
+    tiles = headline_tiles(pack)
+    size = r.tile_versus_size(tiles)
+    found += [("tile", line) for t in tiles for line in (t.budget, t.last_year)
+              if stringWidth(line, "Helvetica", size) > r.tile_room()]
+    found += [("tile value", t.value) for t in tiles
+              if stringWidth(t.value, "Helvetica-Bold", 15) > r.tile_room()]
+    cells = [pnl_header(pack.currency)[1][1:]] + [row.cells for row in pnl_rows(pack)]
+    _, widths, font = r._pnl_layout(cells)
+    found += [("P&L", cell) for row in cells for cell, width in zip(row, widths)
+              if stringWidth(cell, "Helvetica-Bold", font) + 12 > width + 0.01]
+    return found
+
+
+class TestFit:
+    @pytest.mark.parametrize("scale", [190, 2000])
+    def test_a_yen_pack_at_realistic_size_fits(self, tmp_path, scale):
+        """Revenue near 470 million yen (x190) and near 5 billion (x2000), cash in billions."""
+        kpis = tmp_path / "kpis.csv"
+        _write_csv(kpis, KPI_HEADER, [["Headcount", "214", "205", "198"],
+                                      ["Cash balance (JPY 000s)", "2352000", "2700000", "2576000"]])
+        pack = _own_run(tmp_path, pnl=_scaled_pnl(tmp_path, scale), kpis=kpis, currency="JPY",
+                        materiality_abs=Decimal("10000000"), entity="Harmwell Foods KK",
+                        period="June 2026").pack
+        assert pack.subtotals.revenue_actual > Decimal("470000000")
+        assert _misfits(pack) == []
+
+    @pytest.mark.parametrize("code", ["GBP", "EUR", "USD", "JPY", "CHF"])
+    def test_the_sample_fits_in_every_currency(self, code):
+        assert _misfits(_narrated_sample(currency=code)) == []
+
+    def test_wide_figures_take_room_from_the_labels_not_the_type(self, tmp_path):
+        from src import step7_render as r
+        from src.tables import pnl_header, pnl_rows
+        def layout(pack):
+            cells = [pnl_header(pack.currency)[1][1:]] + [row.cells for row in pnl_rows(pack)]
+            return r._pnl_layout(cells)
+        label, _, size = layout(_narrated_sample())
+        assert (round(label, 1), size) == (round(r._PNL_LABEL_W, 1), 8)
+        pack = _own_run(tmp_path, pnl=_scaled_pnl(tmp_path, 2000), kpis=None, currency="JPY",
+                        materiality_abs=Decimal("10000000"), entity="K", period="June 2026").pack
+        label, _, size = layout(pack)
+        assert label < r._PNL_LABEL_W and size == 8
+
+    def test_a_long_tile_line_steps_down_rather_than_wrap(self):
+        from src import step7_render as r
+        from src.tables import headline_tiles
+        assert r.tile_versus_size(headline_tiles(_narrated_sample())) == 7.5
+        assert r.tile_versus_size(headline_tiles(_narrated_sample(currency="CHF"))) == 7
+
+
+class TestPublishedCommands:
+    """Commands the v1.0 and v1.1 instructions published keep working after v1.2.0's renames."""
+
+    def test_cash_unit_pounds_is_read_as_units_with_a_note(self, tmp_path):
+        code, out = _main(["--draft-only", "--cash-unit", "pounds", "--output", str(tmp_path)])
+        assert code == 0
+        assert "Note: --cash-unit pounds is now --cash-unit units; it was read as units." in out
+        text = _flat(_pdf_pages(next(tmp_path.glob("*_DRAFT.pdf")).read_bytes()))
+        assert "Stated in pounds, as in the KPI file." in text
+
+    def test_the_help_offers_the_new_name_and_no_single_currency(self):
+        help_text = _cli_subprocess("--help").stdout.decode("utf-8")
+        assert "{thousands,units}" in help_text and "pounds" not in help_text
+        assert "POUNDS" not in help_text and _retired(help_text) == []

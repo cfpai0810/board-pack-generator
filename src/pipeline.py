@@ -19,8 +19,8 @@ prints. A problem the user can fix (a missing file, a P&L with nothing
 loadable) raises PipelineError with a plain message.
 
 The inputs of a run are explicit: the files (the KPI file is optional),
-the entity and period that head the pack, the unit the KPI file states
-cash in, and the materiality thresholds. Left out, each comes from config,
+the entity and period that head the pack, the currency its amounts are in,
+the unit the KPI file states cash in, and the materiality thresholds. Left out, each comes from config,
 which describes the sample. Nothing downstream reads config for them: it
 reads the Pack.
 
@@ -28,7 +28,7 @@ This module is also the ONE public surface of src/ for the web layer:
 streamlit_app/ imports nothing else from src/. Besides run_pipeline it
 offers the review stage as thin wrappers over the step code
 (review_and_save, signoff_summary, check_text, audit_text), the input
-checks a form needs (parse_materiality, CASH_UNITS), and re-exports the
+checks a form needs (parse_materiality, CASH_UNITS, CURRENCIES), and re-exports the
 display rows, palette and types a page needs. __all__ lists it all.
 """
 
@@ -46,7 +46,8 @@ from src.explain import (
     fav_adv_examples, headline, material_items, model_prompt, placement_example,
     soft_check_example, thresholds, walkthrough,
 )
-from src.formatting import when_text
+from config import CURRENCY, MATERIALITY_ABS
+from src.formatting import CURRENCIES, Currency, table_value, when_text
 from src.notes import MAX_NAME_LENGTH, count_words, row_handling
 from src.state import (
     DRAFT_TEXT, GLYPH, NUMERIC, REVIEWER_TEXT, SECTION_TITLES, Category, Flag, Pack,
@@ -65,16 +66,18 @@ from src.step6_review import (
 from src.step7_render import ScreenChart, save_pack, screen_charts
 from src.story import headline_sentence, pnl_message, summary_line
 from src.tables import (
-    CASH_HEADER, DRAFT_HEX, DRIVERS_HEADER, DRIVERS_NOTE, DRIVERS_TITLE, FINAL_HEX, KPI_HEADER, KPI_NOTE,
-    MATERIAL_HEX, PNL_HEADER, RULE_HEX, DriverRow, PnlRow, Tile, cash_cells, cash_note,
-    commentary_source, drivers_rows, headline_tiles, kpi_rows, pnl_notes, pnl_rows,
+    DRAFT_HEX, DRIVERS_NOTE, DRIVERS_TITLE, FINAL_HEX, KPI_HEADER, KPI_NOTE,
+    MATERIAL_HEX, RULE_HEX, DriverRow, PnlRow, Tile, cash_cells, cash_header, cash_note,
+    commentary_source, drivers_header, drivers_rows, headline_tiles, kpi_rows, pnl_header,
+    pnl_notes, pnl_rows,
 )
 
 __all__ = [
     # the run
     "run_pipeline", "PipelineError", "PipelineResult",
     # the inputs of a run
-    "parse_materiality", "CASH_UNITS", "build_pack", "default_threshold_inputs",
+    "parse_materiality", "CASH_UNITS", "CURRENCIES", "Currency", "build_pack",
+    "default_threshold_inputs",
     "PNL_COLUMNS", "KPI_COLUMNS", "OPTIONAL_KPI_COLUMNS", "CATEGORIES", "MAX_NAME_LENGTH",
     # what the explanation pages quote from a pack
     "headline", "thresholds", "material_items", "MaterialItem", "placement_example",
@@ -87,8 +90,8 @@ __all__ = [
     # what a page displays: the PDF's own text, rows and charts
     "headline_sentence", "summary_line", "pnl_message", "headline_tiles", "Tile",
     "excluded_rows_note", "screen_charts", "ScreenChart",
-    "pnl_rows", "drivers_rows", "PnlRow", "DriverRow", "PNL_HEADER", "DRIVERS_HEADER",
-    "DRIVERS_TITLE", "kpi_rows", "KPI_HEADER", "KPI_NOTE", "cash_cells", "CASH_HEADER", "cash_note",
+    "pnl_rows", "drivers_rows", "PnlRow", "DriverRow", "pnl_header", "drivers_header",
+    "DRIVERS_TITLE", "kpi_rows", "KPI_HEADER", "KPI_NOTE", "cash_cells", "cash_header", "cash_note",
     "pnl_notes", "DRIVERS_NOTE", "when_text", "SECTION_TITLES", "commentary_source",
     "row_handling",
     "DRAFT_HEX", "FINAL_HEX", "MATERIAL_HEX", "RULE_HEX",
@@ -102,8 +105,8 @@ class PipelineError(Exception):
     """A problem with the inputs that a person can fix, stated plainly."""
 
 
-CASH_UNITS = {"thousands": 1000, "pounds": 1}
-"""What one unit of the cash KPI is worth in pounds, by the unit the KPI file states it in."""
+CASH_UNITS = {"thousands": 1000, "units": 1}
+"""What one unit of the cash KPI is worth in whole units of the currency, by the unit the KPI file states it in."""
 
 CATEGORIES = tuple(c.value for c in Category)
 OPTIONAL_KPI_COLUMNS = ("prior_year",)
@@ -132,21 +135,39 @@ class PipelineResult:
 
 
 _PLAIN_NUMBER = re.compile(r"^\d+(?:\.\d+)?$")
-_ABS_RULE = "The absolute threshold must be a positive amount in pounds, such as 50,000."
+_PREFIXES = tuple(sorted({c.sign for c in CURRENCIES.values()} | set(CURRENCIES), key=len,
+                           reverse=True))
+
+
+def _abs_rule(currency: str) -> str:
+    return f"The absolute threshold must be a positive amount in {CURRENCIES[currency].name}, such as 50,000."
+
+
+def _abs_required(currency: str) -> str:
+    return (f"Give the absolute threshold in {CURRENCIES[currency].name}. The default, "
+            f"{table_value(MATERIALITY_ABS)}, is set for the sample in pounds and does not carry "
+            f"over to another currency.")
 _PCT_RULE = "The percentage threshold must be above 0 and at most 100, such as 10."
 
 
-def parse_materiality(abs_text: str, pct_text: str) -> tuple[Decimal, Decimal]:
+def parse_materiality(abs_text: str, pct_text: str, *, currency: str) -> tuple[Decimal, Decimal]:
     """
-    The two thresholds as a person types them ("50,000" or "£50,000"; "10" or
-    "10%"), as Decimals. The amount must be positive and the percentage above
-    0 and at most 100; otherwise PipelineError says what to type.
+    The two thresholds as a person types them ("50,000", "£50,000", "CHF
+    50,000"; "10" or "10%"), as Decimals. The amount must be positive and the
+    percentage above 0 and at most 100; otherwise PipelineError says what to
+    type. In a currency other than the sample's, a blank amount is asked for
+    by name: the sample's default does not carry over.
     """
-    amount = abs_text.strip().removeprefix("£").replace(",", "").strip()
+    amount = abs_text.strip()
+    for prefix in _PREFIXES:
+        amount = amount.removeprefix(prefix)
+    amount = amount.replace(",", "").strip()
     percent = pct_text.strip().removesuffix("%").strip()
     problems = []
-    if not _PLAIN_NUMBER.match(amount) or Decimal(amount) <= 0:
-        problems.append(_ABS_RULE)
+    if not amount and currency != CURRENCY:
+        problems.append(_abs_required(currency))
+    elif not _PLAIN_NUMBER.match(amount) or Decimal(amount) <= 0:
+        problems.append(_abs_rule(currency))
     if not _PLAIN_NUMBER.match(percent) or not 0 < Decimal(percent) <= 100:
         problems.append(_PCT_RULE)
     if problems:
@@ -154,17 +175,24 @@ def parse_materiality(abs_text: str, pct_text: str) -> tuple[Decimal, Decimal]:
     return Decimal(amount), Decimal(percent)
 
 
-def _check_inputs(materiality_abs, materiality_pct, entity, period, cash_scale) -> None:
+def _check_inputs(materiality_abs, materiality_pct, entity, period, cash_scale,
+                  currency) -> None:
     """The run's own inputs, checked before any file is read."""
+    if currency is not None and currency not in CURRENCIES:
+        raise PipelineError(f"The currency must be one of {', '.join(CURRENCIES)}; "
+                            f"{currency!r} is not.")
+    code = CURRENCY if currency is None else currency
+    if materiality_abs is None and code != CURRENCY:
+        raise PipelineError(_abs_required(code))
     if materiality_abs is not None and not Decimal(str(materiality_abs)) > 0:
-        raise PipelineError(_ABS_RULE)
+        raise PipelineError(_abs_rule(code))
     if materiality_pct is not None and not 0 < Decimal(str(materiality_pct)) <= 100:
         raise PipelineError(_PCT_RULE)
     for label, value in (("entity name", entity), ("period", period)):
         if value is not None and not value.strip():
             raise PipelineError(f"The {label} is blank. Type the {label} the pack is for.")
     if cash_scale is not None and cash_scale not in CASH_UNITS.values():
-        raise PipelineError("Cash in the KPI file must be stated in thousands or in pounds.")
+        raise PipelineError("Cash in the KPI file must be stated in thousands or in whole units.")
 
 
 def run_pipeline(
@@ -181,6 +209,7 @@ def run_pipeline(
     entity: Optional[str] = None,
     period: Optional[str] = None,
     cash_scale: Optional[int] = None,
+    currency: Optional[str] = None,
     draft_only: bool = False,
     now: Optional[str] = None,
 ) -> PipelineResult:
@@ -193,8 +222,10 @@ def run_pipeline(
     and never signs. kpis_path=None runs without a KPI file: the KPI section
     then holds only the gross margin derived from the P&L, and the cash
     section says no cash balance was supplied. entity, period, cash_scale
-    (CASH_UNITS: 1000 when the KPI file states cash in thousands, 1 in
-    pounds) and the thresholds left as None come from config, the sample.
+    (CASH_UNITS: 1000 when the KPI file states cash in thousands, 1 in whole
+    units), currency (a code in CURRENCIES; labels only, nothing is
+    converted) and the thresholds left as None come from config, the sample.
+    A currency other than the sample's needs its own absolute threshold.
     client=None drafts with the template.
 
     A problem the person can fix raises PipelineError before anything is
@@ -209,7 +240,8 @@ def run_pipeline(
         raise ValueError("A review needs ask and confirm; use draft_only=True to skip review.")
     pack, data_notes, narrate_notices = _build(
         pnl_path, kpis_path, client=client, materiality_abs=materiality_abs,
-        materiality_pct=materiality_pct, entity=entity, period=period, cash_scale=cash_scale)
+        materiality_pct=materiality_pct, entity=entity, period=period, cash_scale=cash_scale,
+        currency=currency)
 
     output_dir = Path(output_dir)
     if draft_only:
@@ -235,6 +267,7 @@ def build_pack(
     entity: Optional[str] = None,
     period: Optional[str] = None,
     cash_scale: Optional[int] = None,
+    currency: Optional[str] = None,
 ) -> Pack:
     """
     The narrated DRAFT pack from the files, with nothing reviewed, rendered
@@ -243,13 +276,13 @@ def build_pack(
     """
     return _build(pnl_path, kpis_path, client=client, materiality_abs=materiality_abs,
                   materiality_pct=materiality_pct, entity=entity, period=period,
-                  cash_scale=cash_scale)[0]
+                  cash_scale=cash_scale, currency=currency)[0]
 
 
 def _build(pnl_path, kpis_path, *, client, materiality_abs, materiality_pct, entity, period,
-           cash_scale) -> tuple[Pack, list[str], list[str]]:
+           cash_scale, currency) -> tuple[Pack, list[str], list[str]]:
     """(the narrated pack, its data notes, its narrate notices). Writes nothing."""
-    _check_inputs(materiality_abs, materiality_pct, entity, period, cash_scale)
+    _check_inputs(materiality_abs, materiality_pct, entity, period, cash_scale, currency)
     for path in (pnl_path, kpis_path):
         if path is not None and not Path(path).is_file():
             raise PipelineError(f"Input file not found: {path}")
@@ -280,7 +313,7 @@ def _build(pnl_path, kpis_path, *, client, materiality_abs, materiality_pct, ent
         kpis_sha256=loaded.kpis_sha256, **thresholds,
         entity=None if entity is None else entity.strip(),
         period=None if period is None else period.strip(),
-        cash_scale=cash_scale, kpis_supplied=kpis_path is not None,
+        cash_scale=cash_scale, currency=currency, kpis_supplied=kpis_path is not None,
     )
     data_notes = list(pack.warnings)
     if pack.excluded_pnl_rows:

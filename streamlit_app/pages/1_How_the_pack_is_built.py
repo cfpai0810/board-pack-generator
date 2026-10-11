@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
 
 from config import NARRATIVE_MODEL
 from src.pipeline import (
-    DRIVERS_NOTE, SIGN_WORD, count_words, drivers_rows, fav_adv_examples, headline,
+    DRIVERS_NOTE, SIGN_WORD, count_words, drivers_header, drivers_rows, fav_adv_examples, headline,
     headline_sentence, material_items, placement_example, thresholds,
 )
 from streamlit_app.lib.content import sample_pack
@@ -107,7 +107,8 @@ st.markdown(
     "Under the executive summary, a small table shows the main drivers of each material "
     "profit subtotal: the lines whose budget variances moved it most, each as its effect on "
     "profit, in Fav/(Adv) form. On the sample:")
-st.markdown(drivers_table_html(drivers_rows(pack)), unsafe_allow_html=True)
+st.markdown(drivers_table_html(drivers_rows(pack), drivers_header(pack.currency)),
+            unsafe_allow_html=True)
 st.markdown(f'<p class="bp-note">{html.escape(DRIVERS_NOTE)}</p>', unsafe_allow_html=True)
 st.markdown(
     "**Why it is computed rather than written.** In live tests the model was given the "

@@ -36,15 +36,16 @@ AREAS = {
     "Review, sign-off and audit": ["TestReview", "TestAuditAdditions", "TestCheckText",
                                    "TestGlyphsAndDraftRecord", "TestPipelineSurface"],
     "The PDF": ["TestRender", "TestPackLayout", "TestStory", "TestComputedText"],
-    "Command line": ["TestMain", "TestCliOwnFiles"],
+    "Command line": ["TestMain", "TestCliOwnFiles", "TestPublishedCommands"],
     "Your own data and the notes": ["TestOwnData", "TestPlainNotes", "TestNamedExclusions",
                                     "TestCashUnitGuards"],
     "The worked example and the test counts": ["TestWorkedExample", "TestTestCounts"],
     "One language: the glossary": ["TestGlossary"],
+    "Currency": ["TestCurrency", "TestFit"],
     "Web app: review stage": ["TestPagesLoad", "TestSampleRun", "TestReviewStage",
                               "TestWebLayerBoundary"],
     "Web app: own files and the model": ["TestOwnFiles", "TestChangedInputs", "TestModelChoice",
-                                         "TestUploadHandling"],
+                                         "TestUploadHandling", "TestCurrencyChoice"],
     "Web app: content pages": ["TestContentPages", "TestWorkedExampleTab"],
 }
 AREA_OF = {cls: area for area, classes in AREAS.items() for cls in classes}

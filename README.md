@@ -65,7 +65,8 @@ so each number in the pack has one source.
 
 **Materiality.** A line or subtotal is material when its variance against
 budget reaches either threshold (by default £50,000 or 10% of budget; the
-percentage test is not applied across a change of sign). Each material item
+percentage test is not applied across a change of sign). A pack in another
+currency gives its own absolute threshold: the default is set for pounds. Each material item
 is discussed once: a material line under a material subtotal goes to the P&L
 commentary, any other material line to the executive summary.
 
@@ -99,10 +100,18 @@ recorded as acknowledged.
 **KPIs** (`data/kpis.csv`, optional): `metric`, `actual`, `target`, and
 `prior_year` (optional). The cash balance is the row named
 `Cash balance (GBP 000s)`, or `Cash balance` with any unit in brackets; you
-say when you run whether the file states it in thousands or pounds.
+say when you run whether the file states it in thousands or in whole units.
+
+**Currency.** You choose the currency the files are in: GBP (£), EUR (€),
+USD ($), JPY (¥) or CHF. Every amount in the pack is written in it, the sign
+before the number and commas for thousands (€2.48m, CHF 2.48m); CHF is
+written with its code, which the PDF's standard fonts can always print.
+Nothing is converted, and a pack has one currency. A figure written in
+another currency is flagged by the numeric check, and a cash KPI whose name
+states another currency gets a data note.
 
 Column names are matched case-insensitively. Amounts may carry thousands
-separators, a pound sign, brackets or a trailing minus for a negative. A row
+separators, a currency sign or code, brackets or a trailing minus for a negative. A row
 that cannot be read is never dropped silently: it produces a note, and rows
 left out of the totals are named in a box above the P&L table.
 
@@ -185,8 +194,9 @@ For your own files, give their paths and say who and when the pack is for:
 python main.py --pnl my_pnl.csv --kpis my_kpis.csv --entity "Test Co" --period "September 2026"
 ```
 
-Add `--cash-unit pounds` if the KPI file states cash in pounds, and
-`--materiality-abs` or `--materiality-pct` to change the thresholds.
+Add `--currency EUR` (or USD, JPY, CHF) with `--materiality-abs` if the files
+are not in pounds, `--cash-unit units` if the KPI file states cash in whole
+units, and `--materiality-abs` or `--materiality-pct` to change the thresholds.
 `python main.py --help` lists every option.
 
 ### Web app
@@ -300,8 +310,10 @@ reviewer's check.
 **KPI direction is unknown.** The KPI file does not say whether higher is
 better, so KPI differences are shown as plain differences, not Fav/(Adv).
 
-**One period, pounds only.** Each file holds one month, and every amount is
-read as pounds sterling.
+**One period, one currency, five to choose from.** Each file holds one month,
+and every amount is read in the one currency chosen for the run: GBP, EUR,
+USD, JPY or CHF. Nothing is converted, so a group reporting in several
+currencies needs its figures translated before they reach the files.
 
 **The model adds little.** Once the figures, the selection and the
 attribution are computed, the model's wording adds little that the template

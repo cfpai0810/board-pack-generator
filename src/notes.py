@@ -251,13 +251,18 @@ def no_cash_kpi() -> Note:
 
 # -- Cash: guards against the wrong unit (soft, never a block) ----------------------
 
-_UNIT_WORDS = {1000: "thousands", 1: "pounds"}
-
-
-def cash_unit_hint(metric: str, hinted: int, chosen: int) -> Note:
-    return Note(f"Cash: the KPI name '{metric}' suggests {_UNIT_WORDS[hinted]}, but cash was "
-                f"read as {_UNIT_WORDS.get(chosen, f'{chosen:,} pounds per unit')}. Check the "
+def cash_unit_hint(metric: str, hinted: int, chosen: int, currency_name: str) -> Note:
+    words = {1000: "thousands", 1: f"whole {currency_name}"}
+    return Note(f"Cash: the KPI name '{metric}' suggests {words[hinted]}, but cash was "
+                f"read as {words.get(chosen, f'{chosen:,} {currency_name} per unit')}. Check the "
                 f"unit chosen for cash.", kind="cash_unit_hint", file=CASH, name=metric)
+
+
+def cash_currency_hint(metric: str, named: str, chosen: str) -> Note:
+    """named and chosen are currency names in prose: 'US dollars', 'euros'."""
+    return Note(f"Cash: the KPI name '{metric}' suggests {named}, but the pack is in {chosen}. "
+                f"Check the currency chosen for the run.", kind="cash_currency_hint",
+                file=CASH, name=metric)
 
 
 def cash_vs_revenue(cash_text: str, revenue_text: str) -> Note:

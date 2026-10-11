@@ -17,10 +17,10 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from config import CASH_KPI_METRIC, CASH_KPI_SCALE, GROSS_MARGIN_KPI_METRIC, REPO_URL
+from config import CASH_KPI_METRIC, CASH_KPI_SCALE, CURRENCY, GROSS_MARGIN_KPI_METRIC, REPO_URL
 from src.pipeline import (
-    CASH_REVENUE_MULTIPLE, CASH_UNITS, CATEGORIES, KPI_COLUMNS, MAX_NAME_LENGTH,
-    OPTIONAL_KPI_COLUMNS, PNL_COLUMNS, SIGN_WORD, row_handling,
+    CASH_REVENUE_MULTIPLE, CASH_UNITS, CATEGORIES, CURRENCIES, KPI_COLUMNS, MAX_NAME_LENGTH,
+    OPTIONAL_KPI_COLUMNS, PNL_COLUMNS, SIGN_WORD, default_threshold_inputs, row_handling,
 )
 from streamlit_app.lib.content import sample_rows
 from streamlit_app.lib.display import table_html
@@ -30,9 +30,9 @@ from streamlit_app.lib.theme import header_html, inject_css
 PNL_MEANING = {
     "line_item": "The line's name, as the board should read it.",
     "category": "One of " + ", ".join(CATEGORIES[:-1]) + f" or {CATEGORIES[-1]}.",
-    "actuals": "The month's actual, in pounds.",
-    "budget": "The month's budget, in pounds.",
-    "prior_year": "The same month last year, in pounds.",
+    "actuals": "The month's actual, in the pack's currency.",
+    "budget": "The month's budget, in the pack's currency.",
+    "prior_year": "The same month last year, in the pack's currency.",
 }
 KPI_MEANING = {
     "metric": "The KPI's name, with its unit in brackets if it has one.",
@@ -61,7 +61,8 @@ st.markdown(table_html(
     [[c, _required(c, PNL_COLUMNS), PNL_MEANING[c]] for c in PNL_COLUMNS],
     wrap=(2,)), unsafe_allow_html=True)
 st.markdown(
-    "Amounts may include thousands separators, a pound sign, or brackets for a negative, and "
+    "Amounts may include thousands separators, a currency sign or code (such as £, € or "
+    "CHF), or brackets for a negative, and "
     "a trailing minus sign is read as negative too. Leave out subtotal rows: revenue, COGS, "
     "gross profit, opex and EBIT are computed from the lines.")
 header, rows = sample_rows("pnl")
@@ -78,14 +79,25 @@ st.markdown(table_html(
     ["Column", "Required", "What it holds"],
     [[c, _required(c, KPI_COLUMNS), KPI_MEANING[c]] for c in kpi_columns],
     wrap=(2,)), unsafe_allow_html=True)
-units = " or ".join(CASH_UNITS)
 sample_unit = next(unit for unit, scale in CASH_UNITS.items() if scale == CASH_KPI_SCALE)
 st.markdown(
     f"The cash balance is the row named {CASH_KPI_METRIC}, or Cash balance with any unit in "
-    f"brackets. You say when you run whether the file states it in {units}; the sample states "
-    f"it in {sample_unit}. Two checks warn if the choice looks wrong: a unit in the KPI's name that "
-    f"disagrees with it, and a balance more than {CASH_REVENUE_MULTIPLE:,} times the month's "
+    "brackets. You say when you run whether the file states it in thousands or in whole "
+    f"units; the sample states it in {sample_unit}. Three checks warn if a choice looks wrong: "
+    "a unit in the KPI's name that disagrees with the one chosen, a currency in the name other "
+    f"than the pack's, and a balance more than {CASH_REVENUE_MULTIPLE:,} times the month's "
     "revenue. They warn; they never stop the pack.")
+
+st.markdown("#### Currency")
+labels = [c.label for c in CURRENCIES.values()]
+default_abs, _ = default_threshold_inputs()
+st.markdown(
+    f"Choose the currency your files are in: {', '.join(labels[:-1])} or {labels[-1]}. Every "
+    "amount in the pack is written in it, the sign before the number and commas for "
+    "thousands, as in the tables; a currency whose sign the PDF cannot print is written with "
+    "its code. Nothing is converted, and a pack has one currency. The sample is in "
+    f"{CURRENCIES[CURRENCY].name}, and its absolute threshold of {default_abs} is set for "
+    "pounds, so a pack in another currency asks for its own.")
 st.markdown(
     f"A gross margin row ({GROSS_MARGIN_KPI_METRIC}) is not needed and is ignored if present: "
     "the gross margin is computed from the P&L, so the pack has one source for each number.")
@@ -109,7 +121,7 @@ st.markdown(
     f"- Each file up to {MAX_MB} MB, and the P&L up to {MAX_PNL_LINES:,} lines.\n"
     "- One period per file: the month the pack is for. There is no period column; you name "
     "the period when you run.\n"
-    "- Pounds sterling only.\n"
+    "- One currency per pack, from GBP, EUR, USD, JPY and CHF; nothing is converted.\n"
     f"- Names longer than {MAX_NAME_LENGTH} characters are kept, with a note, and wrap "
     "inside their column.")
 
@@ -148,7 +160,8 @@ st.markdown(
     "this app on your machine.")
 st.markdown(
     "For your own files, add `--pnl` and `--kpis` with their paths, `--entity` and "
-    "`--period`, and `--cash-unit pounds` if the KPI file states cash in pounds; "
+    "`--period`, `--currency` with `--materiality-abs` if the files are not in pounds, and "
+    "`--cash-unit units` if the KPI file states cash in whole units; "
     "`python main.py --help` lists every option. The model is used only with `--use-model` "
     "and a key in the environment or a .env file, never one typed on the command line.")
 st.page_link("pages/2_Board_pack.py", label="Board pack: run your own files here instead",

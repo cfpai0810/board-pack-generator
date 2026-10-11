@@ -36,7 +36,7 @@ from typing import Optional, TextIO
 
 from config import KPIS_PATH, NARRATIVE_MODEL, OUTPUT_DIR, PNL_PATH, ROOT
 from src.pipeline import (
-    CASH_UNITS, SIGN_WORD, PipelineError, PipelineResult, is_sign_word, run_pipeline,
+    CASH_UNITS, CURRENCIES, SIGN_WORD, PipelineError, PipelineResult, is_sign_word, run_pipeline,
 )
 from src.state import PackStatus
 
@@ -153,6 +153,8 @@ def build_client(use_model: bool):
 
 # -- Arguments ------------------------------------------------------------------
 
+RENAMED_UNIT = "pounds"      # --cash-unit pounds, before currencies other than GBP: now "units"
+
 def _amount(text: str) -> Decimal:
     try:
         value = Decimal(text)
@@ -171,16 +173,23 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--kpis", type=Path, default=KPIS_PATH, help="KPI CSV (default: the sample)")
     parser.add_argument("--output", type=Path, default=OUTPUT_DIR,
                         help="folder for the PDF and the audit log (default: output/)")
-    parser.add_argument("--materiality-abs", type=_amount, default=None, metavar="POUNDS",
-                        help="absolute materiality threshold (default: config)")
+    parser.add_argument("--materiality-abs", type=_amount, default=None, metavar="AMOUNT",
+                        help="absolute materiality threshold, in the currency of the files "
+                             "(default: config, set for the sample)")
     parser.add_argument("--materiality-pct", type=_amount, default=None, metavar="PERCENT",
                         help="percentage materiality threshold (default: config)")
     parser.add_argument("--entity", default=None,
                         help="the entity the pack is for (required with your own --pnl)")
     parser.add_argument("--period", default=None,
                         help="the period, such as 'September 2026' (required with your own --pnl)")
-    parser.add_argument("--cash-unit", choices=sorted(CASH_UNITS), default=None,
-                        help="the unit the KPI file states cash in (default: thousands)")
+    parser.add_argument("--cash-unit", choices=sorted(CASH_UNITS) + [RENAMED_UNIT],
+                        default=None, metavar="{" + ",".join(sorted(CASH_UNITS)) + "}",
+                        help="the unit the KPI file states cash in: thousands, or whole units "
+                             "of the currency (default: thousands)")
+    parser.add_argument("--currency", choices=list(CURRENCIES), default=None,
+                        help="the currency the files are in (default: GBP, as the sample); "
+                             "amounts are labelled, never converted. Any currency but GBP "
+                             "needs --materiality-abs")
     parser.add_argument("--use-model", action="store_true",
                         help="have the model (Claude, via the Anthropic API) draft the commentary; reads ANTHROPIC_API_KEY "
                              "from the environment or .env, never from an argument")
@@ -221,6 +230,10 @@ def main(argv: Optional[list[str]] = None, *, stdin: Optional[TextIO] = None,
     reviewer = TerminalReviewer(stdin, stdout)
     say = reviewer._say
 
+    if args.cash_unit == RENAMED_UNIT:      # published in the v1.0 and v1.1 instructions
+        say("Note: --cash-unit pounds is now --cash-unit units; it was read as units.")
+        args.cash_unit = "units"
+
     own_file = Path(args.pnl).is_file() and Path(args.pnl).resolve() != PNL_PATH.resolve()
     if own_file and not (args.entity and args.period):
         say("Stopped: with your own P&L file, give --entity and --period, so the pack is "
@@ -240,7 +253,7 @@ def main(argv: Optional[list[str]] = None, *, stdin: Optional[TextIO] = None,
             materiality_abs=args.materiality_abs, materiality_pct=args.materiality_pct,
             entity=args.entity, period=args.period,
             cash_scale=None if args.cash_unit is None else CASH_UNITS[args.cash_unit],
-            draft_only=args.draft_only,
+            currency=args.currency, draft_only=args.draft_only,
         )
     except PipelineError as e:
         say(f"Stopped: {e}")

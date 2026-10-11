@@ -2,7 +2,7 @@
 # lib/inputs.py: the inputs of a run, from the form to run_pipeline
 # =============================================================================
 # The "Run it yourself" form gathers the source files, the entity and period,
-# the unit cash is stated in, the materiality thresholds and the commentary
+# the currency, the unit cash is stated in, the materiality thresholds and the commentary
 # choice. This module checks only what the web layer alone knows (an
 # upload's size and length, and that the form is complete), stages the
 # uploaded bytes in the session's own temporary folder, and hands everything
@@ -22,7 +22,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional
 
-from config import KPIS_PATH, PNL_PATH
+from config import CURRENCY, KPIS_PATH, PNL_PATH
 from src.pipeline import (
     CASH_UNITS, PipelineError, PipelineResult, default_threshold_inputs, parse_materiality,
     run_pipeline,
@@ -34,7 +34,7 @@ MAX_PNL_LINES = 500
 
 SAMPLE, OWN = "Use the sample", "Use my own files"
 TEMPLATE, MODEL = "Template", "Model"
-CASH_CHOICES = {"thousands": "Thousands (as in the sample)", "pounds": "Pounds"}
+CASH_CHOICES = {"thousands": "Thousands (as in the sample)", "units": "Whole units"}
 DEFAULT_ABS, DEFAULT_PCT = default_threshold_inputs()
 
 
@@ -56,6 +56,7 @@ class RunInputs:
     kpis: Optional[Upload] = None
     entity: str = ""
     period: str = ""
+    currency: str = CURRENCY
     cash_unit: str = "thousands"
     materiality_abs: str = DEFAULT_ABS
     materiality_pct: str = DEFAULT_PCT
@@ -65,7 +66,8 @@ class RunInputs:
         """The inputs that matter: with the sample, the own-file fields are ignored."""
         if self.source == OWN:
             return self
-        return replace(self, pnl=None, kpis=None, entity="", period="", cash_unit="thousands")
+        return replace(self, pnl=None, kpis=None, entity="", period="", currency=CURRENCY,
+                       cash_unit="thousands")
 
 
 def _kb(n_bytes: int) -> str:
@@ -135,9 +137,10 @@ def build_draft(inputs: RunInputs, folder: Path, client=None) -> PipelineResult:
     PipelineError (UploadError included) with a plain message; nothing of a
     refused run is left behind.
     """
-    materiality_abs, materiality_pct = parse_materiality(inputs.materiality_abs,
-                                                         inputs.materiality_pct)
     own = inputs.source == OWN
+    currency = inputs.currency if own else CURRENCY
+    materiality_abs, materiality_pct = parse_materiality(
+        inputs.materiality_abs, inputs.materiality_pct, currency=currency)
     try:
         pnl_path, kpis_path = stage(inputs, folder)
         return run_pipeline(
@@ -146,6 +149,7 @@ def build_draft(inputs: RunInputs, folder: Path, client=None) -> PipelineResult:
             entity=inputs.entity if own else None,
             period=inputs.period if own else None,
             cash_scale=CASH_UNITS[inputs.cash_unit] if own else None,
+            currency=currency if own else None,
         )
     finally:
         shutil.rmtree(Path(folder) / "inputs", ignore_errors=True)

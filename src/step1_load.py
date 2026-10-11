@@ -35,7 +35,7 @@ from src.state import Category, Kpi, PnlLine
 
 # -- Amount parsing -----------------------------------------------------------
 
-_CURRENCY_RE = re.compile(r"[£$\u20ac\u00a5]")
+_CURRENCY_RE = re.compile(r"[£$\u20ac\u00a5]|\b(?:GBP|EUR|USD|JPY|CHF)\b", re.IGNORECASE)
 _THOUSANDS_RE = re.compile(r",(?=\d{3})")
 
 

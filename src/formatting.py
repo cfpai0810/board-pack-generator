@@ -10,10 +10,16 @@ Finance reasoning: a board reads prose, not ledgers. Prose money is a
 magnitude at a sensible scale (£2.48m, £112k), direction is carried by
 words (above budget, below last year, a loss of) rather than minus signs,
 and a figure that rounds to nothing reads as nothing ("0.0%", never
-"-0.0%"; "in line with budget"). Tables keep whole pounds. The cash KPI is
-stated in thousands or in pounds (the run says which), and is converted
-to pounds before it is formatted; a raw thousands figure never reaches a
-sentence.
+"-0.0%"; "in line with budget"). Tables keep whole units. The cash KPI is
+stated in thousands or in whole units (the run says which), and is
+converted to whole units before it is formatted; a raw thousands figure
+never reaches a sentence.
+
+Currency: one per pack, chosen for the run from CURRENCIES, and never
+converted. Every money helper takes the pack's currency code and writes its
+prefix before the number, with commas for thousands: '£2.48m', '€112k',
+'CHF 2.48m'. A currency whose sign the PDF's standard fonts cannot print is
+written with its ISO code, as CHF is here.
 
 All rounding is ROUND_HALF_UP, the convention a reader expects, applied
 only here at display. Every helper takes a Decimal and returns a string.
@@ -21,8 +27,42 @@ only here at display. Every helper takes a Decimal and returns a string.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
+
+
+# -- Currency -------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Currency:
+    """
+    code: the ISO code, 'EUR'. prefix: what is written before an amount,
+    '€', or the code and a space for a currency without a printable sign.
+    name: the plural for prose, 'euros'.
+    """
+    code: str
+    prefix: str
+    name: str
+
+    @property
+    def sign(self) -> str:
+        """The prefix alone, for a column of a table: '€', 'CHF'."""
+        return self.prefix.strip()
+
+    @property
+    def label(self) -> str:
+        """How a list to choose from shows it: 'EUR (€)', or 'CHF'."""
+        return self.code if self.sign == self.code else f"{self.code} ({self.sign})"
+
+
+CURRENCIES = {c.code: c for c in (
+    Currency("GBP", "£", "pounds"),
+    Currency("EUR", "€", "euros"),
+    Currency("USD", "$", "US dollars"),
+    Currency("JPY", "¥", "yen"),
+    Currency("CHF", "CHF ", "Swiss francs"),
+)}
 
 
 
@@ -42,62 +82,63 @@ def is_nil(value: Decimal, places: int = 0) -> bool:
 # -- Money --------------------------------------------------------------------
 
 def table_money(value: Decimal) -> str:
-    """Whole pounds with separators for tables: '2,477,550', '-46,120'."""
+    """Whole units with separators for tables: '2,477,550', '-46,120'."""
     return f"{_round(value, 0):,}"
 
 
-def prose_money(value: Decimal) -> str:
+def prose_money(value: Decimal, currency: str) -> str:
     """
-    A magnitude for prose: £bn to 2dp at or above £1bn ('£1.23bn'), £m to
-    2dp at or above £1m ('£2.48m'), £k to the nearest thousand at or above
-    £1,000 ('£112k'), whole pounds below that ('£850'). The unit is chosen
-    after rounding, so 999,600 reads '£1.00m' rather than '£1,000k', and
-    999,996,000 reads '£1.00bn' rather than '£1,000.00m'. No sign: the
-    sentence carries the direction.
+    A magnitude for prose in the pack's currency: bn to 2dp at or above 1bn
+    ('£1.23bn'), m to 2dp at or above 1m ('£2.48m'), k to the nearest
+    thousand at or above 1,000 ('€112k'), whole units below that ('$850',
+    'CHF 850'). The unit is chosen after rounding, so 999,600 reads '£1.00m'
+    rather than '£1,000k', and 999,996,000 reads '£1.00bn' rather than
+    '£1,000.00m'. No sign: the sentence carries the direction.
     """
+    prefix = CURRENCIES[currency].prefix
     magnitude = value.copy_abs()
-    pounds = _round(magnitude, 0)
-    if pounds < 1000:
-        return f"£{pounds}"
+    units = _round(magnitude, 0)
+    if units < 1000:
+        return f"{prefix}{units}"
     thousands = _round(magnitude.scaleb(-3), 0)
     if thousands < 1000:
-        return f"£{thousands:,}k"
+        return f"{prefix}{thousands:,}k"
     millions = _round(magnitude.scaleb(-6), 2)
     if millions < 1000:
-        return f"£{millions:,}m"
-    return f"£{_round(magnitude.scaleb(-9), 2):,}bn"
+        return f"{prefix}{millions:,}m"
+    return f"{prefix}{_round(magnitude.scaleb(-9), 2):,}bn"
 
 
-def cash_pounds(value: Decimal, scale) -> Decimal:
-    """The cash KPI in pounds, given what one unit of it is worth (1000 for thousands, 1 for pounds)."""
+def cash_amount(value: Decimal, scale) -> Decimal:
+    """The cash KPI in whole units, given what one unit of it is worth (1000 for thousands, 1 for whole units)."""
     return value * scale
 
 
-def prose_cash(value: Decimal, scale) -> str:
-    """Cash KPI figure for prose: 1,176 in thousands, or 1,176,000 in pounds, reads '£1.18m'."""
-    return prose_money(cash_pounds(value, scale))
+def prose_cash(value: Decimal, scale, currency: str) -> str:
+    """Cash KPI figure for prose: 1,176 in thousands, or 1,176,000 in whole units, reads '£1.18m'."""
+    return prose_money(cash_amount(value, scale), currency)
 
 
-def cash_balance_phrase(value: Decimal, scale) -> str:
+def cash_balance_phrase(value: Decimal, scale, currency: str) -> str:
     """
     A cash balance for prose, which may be negative: '£1.18m', or 'an
     overdraft of £120k'. prose_cash gives a magnitude, right for a difference
     ('£174k below target') but not for the balance itself, whose sign the
     sentence must carry, as profit_phrase carries a loss.
     """
-    pounds = cash_pounds(value, scale)
-    if pounds < 0 and not is_nil(pounds):
-        return f"an overdraft of {prose_money(pounds)}"
-    return prose_money(pounds)
+    amount = cash_amount(value, scale)
+    if amount < 0 and not is_nil(amount):
+        return f"an overdraft of {prose_money(amount, currency)}"
+    return prose_money(amount, currency)
 
 
-def profit_phrase(value: Decimal, qualifier: str = "") -> str:
+def profit_phrase(value: Decimal, currency: str, qualifier: str = "") -> str:
     """
     A profit figure that may be negative: 'a loss of £46k', 'a profit of
     £147k', or with qualifier 'budgeted ', 'a budgeted profit of £147k'.
     """
     kind = "loss" if value < 0 and not is_nil(value) else "profit"
-    return f"a {qualifier}{kind} of {prose_money(value)}"
+    return f"a {qualifier}{kind} of {prose_money(value, currency)}"
 
 
 # -- Percentages, points and plain numbers ------------------------------------
@@ -192,7 +233,7 @@ def unprintable(text: str) -> list[str]:
 
 
 # -- Table cells for the rendered pack (step7) --------------------------------
-# The finance reader's conventions. Values: whole pounds, negatives in
+# The finance reader's conventions. Values: whole units, negatives in
 # brackets. Variance columns are Fav/(Adv): favourable plain, adverse in
 # brackets, with the percentage following the same sign. For revenue and
 # profit the stored variance already reads that way; for costs the sign is
@@ -204,7 +245,7 @@ def _bracketed(rounded: Decimal, text: str) -> str:
 
 
 def table_value(value: Decimal) -> str:
-    """Whole pounds, negatives in brackets: '1,643,820', '(46,120)', '0'."""
+    """Whole units, negatives in brackets: '1,643,820', '(46,120)', '0'."""
     rounded = _round(value, 0)
     return _bracketed(rounded, f"{rounded.copy_abs():,}")
 
