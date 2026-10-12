@@ -82,7 +82,7 @@ DIRECTION_PHRASES = (
 # the project is a git repository; otherwise this constant. Bump it whenever
 # a change could alter a figure or the commentary from the same inputs.
 
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 
 # -- The repository -------------------------------------------------------------
 

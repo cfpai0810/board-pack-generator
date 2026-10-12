@@ -1,6 +1,7 @@
-# Run the whole suite on every push and pull request, on the Python version
-# the app is deployed with. The suite blocks every network connection and
-# tests the model path with fake clients, so it needs no secrets.
+# Run the whole suite on every push and pull request, on Python 3.14 (the
+# version the live app runs) and 3.13. The suite blocks every network
+# connection and tests the model path with fake clients, so it needs no
+# secrets.
 name: tests
 
 on:
@@ -13,11 +14,15 @@ permissions:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - name: Install

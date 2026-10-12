@@ -29,13 +29,13 @@ the exact file it produced.
 The PDF reads as a story. Page 1 opens with a headline (EBIT against budget
 and last year), a summary line on where the variance came from, and four tiles
 (revenue, gross profit, the gross margin and EBIT), then the commentary, the
-budget-to-actual bridge beside the drivers table, and the KPIs. The P&L page
-opens with its own message and a chart of each line's effect on profit, then
-the full table; cash and the governance panel follow. The headline, the
-summary line, the tiles, the charts and the P&L message are computed from the
-figures: they say what moved and by how much, never why, and the reviewer
-cannot edit them. The review screen shows them too, built by the same
-functions.
+budget-to-actual bridge with the drivers table (beside it, or above it when
+the bridge's labels are long), and the KPIs. The P&L page opens with its own
+message and a chart of each line's effect on profit, then the full table; cash
+and the governance panel follow. The headline, the summary line, the tiles,
+the charts and the P&L message are computed from the figures: they say what
+moved and by how much, never why, and the reviewer cannot edit them. The
+review screen shows them too, built by the same functions.
 
 Two ways to use it:
 
@@ -44,10 +44,11 @@ Two ways to use it:
 prompts. The PDF and the audit trail are written to `output/`.
 
 **Web app.** Run `streamlit run streamlit_app/Home.py` for a five-page
-Streamlit app. A signed worked example opens with no run and no key; the
-Board pack page builds a draft from the sample or your own files, takes you
-through review and sign-off, and offers the PDF and the audit lines. To have
-the model draft the commentary, enter your own Anthropic key in the sidebar.
+Streamlit app. A signed worked example opens with no run and no key; the Board
+pack page builds a draft from the sample or your own files, in any of five
+currencies, takes you through review and sign-off, and offers the PDF and the
+audit lines. To have the model draft the commentary, enter your own Anthropic
+key in the sidebar.
 
 ---
 
@@ -66,9 +67,10 @@ so each number in the pack has one source.
 **Materiality.** A line or subtotal is material when its variance against
 budget reaches either threshold (by default £50,000 or 10% of budget; the
 percentage test is not applied across a change of sign). A pack in another
-currency gives its own absolute threshold: the default is set for pounds. Each material item
-is discussed once: a material line under a material subtotal goes to the P&L
-commentary, any other material line to the executive summary.
+currency gives its own absolute threshold: the default is set for pounds.
+Each material item is discussed once: a material line under a material
+subtotal goes to the P&L commentary, any other material line to the executive
+summary.
 
 **Favourable and adverse.** Variance columns are headed Fav/(Adv): favourable
 variances plain, adverse in brackets, and for a cost an overspend is adverse.
@@ -111,9 +113,9 @@ another currency is flagged by the numeric check, and a cash KPI whose name
 states another currency gets a data note.
 
 Column names are matched case-insensitively. Amounts may carry thousands
-separators, a currency sign or code, brackets or a trailing minus for a negative. A row
-that cannot be read is never dropped silently: it produces a note, and rows
-left out of the totals are named in a box above the P&L table.
+separators, a currency sign or code, brackets or a trailing minus for a
+negative. A row that cannot be read is never dropped silently: it produces a
+note, and rows left out of the totals are named in a box above the P&L table.
 
 See the Your own data page in the web app for the full formats, example rows,
 and a table of what happens to blank, unnamed, unreadable and long rows,
@@ -161,6 +163,13 @@ commentary, never the figures or the tables. A pack is signed only with a
 reviewer name and the word SIGN typed exactly; a FINAL carries the name and
 the time of sign-off and cannot be edited, only replaced by a new run.
 
+If the web app is updated while a review is open, the session is reset the
+next time a page runs: a pack built by the old release is set aside, the
+reviewer's edits are kept for the next draft, and the page says "The app was
+updated. Please build the draft again; your edits have been kept." A signed
+pack's PDF and audit downloads stay, and the engine refuses to sign a pack
+that is already FINAL, whichever release built it.
+
 A signed pack renders to identical bytes every time: the PDF is built in
 reportlab's invariant mode and a FINAL is dated by its sign-off. The SHA-256
 recorded when a pack is signed therefore proves which file was signed. The
@@ -206,8 +215,10 @@ streamlit run streamlit_app/Home.py
 ```
 
 The live demo runs on Streamlit Community Cloud from `streamlit_app/Home.py`
-with `requirements.txt` and Python 3.13. It needs no secrets. After a release
-that changes `src/`, reboot it: see [docs/releasing.md](docs/releasing.md).
+with `requirements.txt` and Python 3.14. It needs no secrets. Reboot it right
+after every push, then open all five pages: Streamlit Cloud pulls a push into
+the running app without restarting it and keeps old modules loaded (see
+[docs/releasing.md](docs/releasing.md)).
 
 ### API key
 
@@ -258,7 +269,9 @@ streamlit_app/
     2_Board_pack.py              The worked example, and a run of your own
     3_Your_own_data.py           The file formats, limits, privacy, running locally
     4_How_its_built.py           The pipeline, tests, audit trail, limitations
-  lib/                           Theme, display, inputs, content, key gate
+  lib/                           Theme, display, inputs, content, key gate, and
+                                 fresh.py, the release check every page runs
+                                 through Home
 
 scripts/
   build_worked_example.py        The signed sample pack, its audit lines and page images
@@ -268,7 +281,7 @@ data/                            The sample P&L and KPI files
 generated/                       The worked example and the test counts
 tests/                           test_pipeline.py (engine), test_web.py (web app)
 docs/glossary.md                 The project's terms, and the variants it retired
-docs/releasing.md                The release checklist, with the reboot after a push
+docs/releasing.md                The release checklist, with the reboot after every push
 docs/release-notes.md            What each release changed
 output/                          Generated packs and audit logs (gitignored)
 ```
@@ -279,10 +292,10 @@ output/                          Generated packs and audit logs (gitignored)
 
 Every review and every rendered PDF appends one line to an append-only JSONL
 file, linked by a run id. The review line records the input files' SHA-256
-hashes, the code version, the thresholds, the material items and drivers,
-each section's draft and final text, every flag and what was acknowledged at
-sign-off, and every data note with its fields. The rendered line records the
-PDF's file name and SHA-256.
+hashes, the code version, the currency, the thresholds, the material items and
+drivers, each section's draft and final text, every flag and what was
+acknowledged at sign-off, and every data note with its fields. The rendered
+line records the PDF's file name and SHA-256.
 
 ---
 
@@ -297,9 +310,10 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-The whole suite runs in GitHub Actions on every push and pull request. A full
-passing run writes the counts by area to `generated/test_counts.json`, which
-the web app shows.
+The whole suite runs in GitHub Actions on every push and pull request, on
+Python 3.14 (the version the live app runs) and 3.13. A full passing run
+writes the counts by area to `generated/test_counts.json`, which the web app
+shows.
 
 ---
 
@@ -326,7 +340,7 @@ does not. That is why the template is the default and the model an option.
 
 ## Tech stack
 
-Python 3.13 . Claude, via the Anthropic API . Streamlit . reportlab . python-dotenv .
+Python 3.13 and 3.14 . Claude, via the Anthropic API . Streamlit . reportlab . python-dotenv .
 pytest
 
 ---

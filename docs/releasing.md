@@ -18,7 +18,8 @@ state, and the version tag sits on the second.
    `docs/release-notes.md` first, with any commit since the last tag that
    changed what users run.
 7. **Push both commits and the tag together**:
-   `git push origin main vX.Y.Z`. Confirm CI is green on the tagged commit.
+   `git push origin main vX.Y.Z`. Confirm CI is green on the tagged commit,
+   on both Python versions.
 8. **Reboot the app on Streamlit Cloud right after every push, then open all
    five pages**: Home, How the pack is built, Board pack, Your own data and
    How it's built (share.streamlit.io, the app's menu, Reboot app). This is

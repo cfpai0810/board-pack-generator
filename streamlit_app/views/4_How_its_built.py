@@ -97,10 +97,10 @@ st.markdown(
     "These are the worked example's two lines, exactly as written:")
 st.code(example["audit_text"], language=None, wrap_lines=True)
 st.markdown(
-    "The review line holds the input files' hashes, the code version, the thresholds, the "
-    "material items and the drivers, each section's draft and final text, every flag, and "
-    "what was acknowledged at sign-off. The rendered line holds the PDF's file name and "
-    "SHA-256. The run id links the two.")
+    "The review line holds the input files' hashes, the code version, the currency, the "
+    "thresholds, the material items and the drivers, each section's draft and final text, "
+    "every flag, and what was acknowledged at sign-off. The rendered line holds the PDF's "
+    "file name and SHA-256. The run id links the two.")
 
 st.markdown("#### What the model sees")
 system, user = model_prompt(pack)

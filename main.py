@@ -8,6 +8,7 @@ Run the board pack generator end to end.
     python main.py --draft-only            no prompts: a DRAFT pack and its review notes
     python main.py --use-model             have the model (Claude, via the Anthropic API) draft the commentary
     python main.py --pnl my_pnl.csv --kpis my_kpis.csv --output out/
+    python main.py --pnl my_pnl.csv --kpis my_kpis.csv --currency EUR --materiality-abs 40000
 
 main() only parses the arguments, builds the terminal ask and confirm (and
 the model client when --use-model is given and a key is available), calls
