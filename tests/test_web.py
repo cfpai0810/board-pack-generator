@@ -1024,3 +1024,76 @@ class TestCurrencyChoice:
         chosen = RunInputs(source=OWN, currency="JPY")
         assert chosen.effective().currency == "JPY"
         assert RunInputs(source=SAMPLE, currency="JPY").effective().currency == "GBP"
+
+
+# ── A RELEASE PULLED INTO THE RUNNING APP: NO REBOOT NEEDED ─────────────
+
+class TestFreshModules:
+    """
+    Streamlit Cloud pulls a release without restarting Python and reloads only
+    streamlit_app/; Home drops the project's older modules so the run imports
+    the release on disk. Tested on a stand-in project and module table, so the
+    test process's own modules are never touched.
+    """
+
+    def _project(self, root: Path, version: str) -> Path:
+        (root / "src").mkdir(parents=True)
+        (root / "streamlit_app" / "lib").mkdir(parents=True)
+        (root / "config.py").write_text(f'VERSION = "{version}"\n', encoding="utf-8")
+        (root / "src" / "pipeline.py").write_text("X = 1\n", encoding="utf-8")
+        (root / "streamlit_app" / "lib" / "content.py").write_text("", encoding="utf-8")
+        return root
+
+    def _loaded(self, root: Path, version: str) -> dict:
+        def module(name, path, **attrs):
+            m = types.ModuleType(name)
+            m.__file__ = str(path)
+            m.__dict__.update(attrs)
+            return m
+        return {
+            "config": module("config", root / "config.py", VERSION=version),
+            "src.pipeline": module("src.pipeline", root / "src" / "pipeline.py"),
+            "streamlit_app.lib.content": module("streamlit_app.lib.content",
+                                                root / "streamlit_app" / "lib" / "content.py"),
+            "reportlab": module("reportlab", root.parent / "site-packages" / "reportlab.py"),
+            "__main__": module("__main__", root / "streamlit_app" / "Home.py"),
+        }
+
+    def test_an_older_release_in_memory_is_dropped_and_the_caches_cleared(self, tmp_path):
+        from streamlit_app.lib.fresh import drop_stale_modules
+        root = self._project(tmp_path / "app", "1.2.0")
+        modules, cleared = self._loaded(root, "1.1.0"), []
+        dropped = drop_stale_modules(root, modules, lambda: cleared.append(True))
+        assert sorted(dropped) == ["config", "src.pipeline", "streamlit_app.lib.content"]
+        assert sorted(modules) == ["__main__", "reportlab"] and cleared == [True]
+
+    def test_the_release_on_disk_is_kept(self, tmp_path):
+        from streamlit_app.lib.fresh import LOADED_STAMP, drop_stale_modules
+        root = self._project(tmp_path / "app", "1.2.0")
+        modules = self._loaded(root, "1.2.0")
+        assert drop_stale_modules(root, modules, lambda: pytest.fail("no caches to clear")) == []
+        assert len(modules) == 5 and getattr(modules["config"], LOADED_STAMP) > 0
+
+    def test_a_file_pulled_after_loading_drops_the_modules(self, tmp_path):
+        import os
+        from streamlit_app.lib.fresh import drop_stale_modules, mark_loaded
+        root = self._project(tmp_path / "app", "1.2.0")
+        modules = self._loaded(root, "1.2.0")
+        mark_loaded(root, modules)
+        assert drop_stale_modules(root, modules) == []
+        later = (root / "src" / "pipeline.py").stat().st_mtime + 60
+        os.utime(root / "src" / "pipeline.py", (later, later))    # the next release, same VERSION
+        assert "src.pipeline" in drop_stale_modules(root, modules)
+
+    def test_nothing_loaded_yet_is_nothing_to_drop(self, tmp_path):
+        from streamlit_app.lib.fresh import drop_stale_modules
+        root = self._project(tmp_path / "app", "1.2.0")
+        assert drop_stale_modules(root, {}) == []
+
+    def test_home_checks_before_it_imports_anything_of_the_projects(self):
+        source = (ROOT / "streamlit_app" / "Home.py").read_text(encoding="utf-8")
+        check = source.index("drop_stale_modules(ROOT")
+        first_own = min(source.index(s) for s in ("from streamlit_app.lib.key_gate",
+                                                    "from streamlit_app.lib.theme", "from config",
+                                                    "from src") if s in source)
+        assert check < first_own

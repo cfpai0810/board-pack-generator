@@ -43,7 +43,7 @@ AREAS = {
     "One language: the glossary": ["TestGlossary"],
     "Currency": ["TestCurrency", "TestFit"],
     "Web app: review stage": ["TestPagesLoad", "TestSampleRun", "TestReviewStage",
-                              "TestWebLayerBoundary"],
+                              "TestWebLayerBoundary", "TestFreshModules"],
     "Web app: own files and the model": ["TestOwnFiles", "TestChangedInputs", "TestModelChoice",
                                          "TestUploadHandling", "TestCurrencyChoice"],
     "Web app: content pages": ["TestContentPages", "TestWorkedExampleTab"],

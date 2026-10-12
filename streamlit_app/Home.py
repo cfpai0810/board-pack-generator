@@ -18,8 +18,16 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Before anything of the project's is imported: a release pulled into the
+# running app replaces the old modules on this run (lib/fresh.py).
+from streamlit_app.lib.fresh import drop_stale_modules, mark_loaded
+
+drop_stale_modules(ROOT, clear_caches=lambda: (st.cache_data.clear(), st.cache_resource.clear()))
+
 from streamlit_app.lib.key_gate import render_key_gate
 from streamlit_app.lib.theme import header_html, inject_css
+
+mark_loaded(ROOT)
 
 PAGES_DIR = Path(__file__).resolve().parent / "pages"
 
