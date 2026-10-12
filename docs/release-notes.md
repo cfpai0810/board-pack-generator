@@ -1,5 +1,24 @@
 # Release notes
 
+## v1.2.3
+
+The documentation brought up to date with v1.2.x, and the tests run on the
+Python version the live app runs.
+
+- The How it's built page lists the currency among what the review line of
+  the audit trail holds, as the line itself has since v1.2.0.
+- CI runs the whole suite on Python 3.14, the version the live app runs, as
+  well as 3.13, on every push and pull request. Each version is reported on
+  its own, so a failure on one does not hide the other.
+- The README: the live app is rebooted right after every push; the bridge
+  sits above the drivers table when its labels are long; the web app takes
+  files in any of five currencies; what happens to an open review when the
+  app is updated; the currency in the audit trail; `fresh.py` in the project
+  structure; the Python versions. The CLI's usage lines include a run in
+  euros.
+- `docs/releasing.md`: CI must be green on the tagged commit on both Python
+  versions.
+
 ## v1.2.2
 
 v1.2.2: live app recovery after v1.2.1 (4ad5fc0); pages moved to views/ so
