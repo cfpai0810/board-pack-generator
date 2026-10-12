@@ -1,9 +1,9 @@
 {
   "written_by": "tests/conftest.py, after a full passing run of the suite",
-  "total": 631,
+  "total": 652,
   "by_suite": {
-    "engine": 542,
-    "web": 89
+    "engine": 554,
+    "web": 98
   },
   "by_area": [
     {
@@ -56,11 +56,11 @@
     },
     {
       "area": "Currency",
-      "tests": 28
+      "tests": 40
     },
     {
       "area": "Web app: review stage",
-      "tests": 43
+      "tests": 52
     },
     {
       "area": "Web app: own files and the model",
@@ -85,9 +85,9 @@
     "TestCurrency": 19,
     "TestCurrencyChoice": 4,
     "TestDirectionFlag": 6,
-    "TestFit": 9,
+    "TestFit": 21,
     "TestFormatting": 32,
-    "TestFreshModules": 5,
+    "TestFreshModules": 12,
     "TestGlossary": 13,
     "TestGlyphsAndDraftRecord": 10,
     "TestItemKeys": 6,
@@ -112,6 +112,7 @@
     "TestReviewStage": 17,
     "TestSampleRun": 8,
     "TestSharedTables": 5,
+    "TestSignedPackAcrossAnUpdate": 2,
     "TestStory": 9,
     "TestTableFormatting": 18,
     "TestTestCounts": 3,
