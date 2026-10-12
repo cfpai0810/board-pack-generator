@@ -38,13 +38,15 @@ with sys.__dict__.setdefault("_board_pack_fresh_lock", threading.Lock()):
 # multipage mode), skipping the release check below.
 PAGES_DIR = Path(__file__).resolve().parent / "views"
 
-HOW_BUILT = st.Page(str(PAGES_DIR / "1_How_the_pack_is_built.py"),
+# Each page's address is pinned: links to them are published (the README, the
+# docs, posts), and a renamed or moved file must not change them.
+HOW_BUILT = st.Page(str(PAGES_DIR / "1_How_the_pack_is_built.py"), url_path="How_the_pack_is_built",
                     title="How the pack is built", icon=":material/menu_book:")
-BOARD_PACK = st.Page(str(PAGES_DIR / "2_Board_pack.py"),
+BOARD_PACK = st.Page(str(PAGES_DIR / "2_Board_pack.py"), url_path="Board_pack",
                      title="Board pack", icon=":material/description:")
-OWN_DATA = st.Page(str(PAGES_DIR / "3_Your_own_data.py"),
+OWN_DATA = st.Page(str(PAGES_DIR / "3_Your_own_data.py"), url_path="Your_own_data",
                    title="Your own data", icon=":material/upload_file:")
-HOW_ITS_BUILT = st.Page(str(PAGES_DIR / "4_How_its_built.py"),
+HOW_ITS_BUILT = st.Page(str(PAGES_DIR / "4_How_its_built.py"), url_path="How_its_built",
                         title="How it's built", icon=":material/build:")
 
 

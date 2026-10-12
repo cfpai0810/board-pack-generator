@@ -1252,6 +1252,19 @@ class TestFreshModules:
         finally:
             sys.modules["streamlit_app.lib.fresh"], lib.fresh = real, real
 
+    def test_the_published_page_addresses_are_pinned(self):
+        """/Board_pack and the others are linked from outside: a moved or renamed file must not change them."""
+        tree = ast.parse((APP / "Home.py").read_text(encoding="utf-8"))
+        pinned = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "Page":
+                kwargs = {k.arg: k.value.value for k in node.keywords
+                          if isinstance(k.value, ast.Constant)}
+                if "url_path" in kwargs:
+                    pinned[kwargs["url_path"]] = kwargs["title"]
+        assert pinned == {"How_the_pack_is_built": "How the pack is built", "Board_pack": "Board pack",
+                          "Your_own_data": "Your own data", "How_its_built": "How it's built"}
+
     def test_no_pages_folder_beside_home(self):
         """
         A folder named pages/ beside Home.py lets Streamlit run a page without

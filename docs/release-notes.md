@@ -1,12 +1,35 @@
 # Release notes
 
-## Unreleased (since v1.2.1)
+## v1.2.2
 
-- The live app failed after the v1.2.1 push: Home called `fresh.held()`, but
-  Streamlit Cloud kept the copy of `streamlit_app/lib/fresh.py` loaded from
-  `21c09d9`, which has no `held()`. Home now reloads that file itself when
-  it has changed since it was loaded, under a lock; the check can then purge
-  everything else as designed. For the next tagged release's notes.
+v1.2.2: live app recovery after v1.2.1 (4ad5fc0); pages moved to views/ so
+every page runs the release check.
+
+- The outage: after the v1.2.1 push on 12 October 2026 every page of the live
+  app failed with an AttributeError. Home called `fresh.held()`, but Streamlit
+  Cloud kept the copy of `streamlit_app/lib/fresh.py` loaded from `21c09d9`,
+  which has no `held()`. `4ad5fc0` (pushed the same day, untagged until this
+  release) has Home reload that file itself, under a lock, when it has
+  changed since it was loaded; the check then purges everything else as
+  designed. The app recovered on the first page view after that push.
+- The pages moved from `streamlit_app/pages/` to `streamlit_app/views/` in
+  v1.2.1 (`8dcbf1a`): a `pages/` folder let Streamlit run a page without
+  Home, so the release check and the session reset could be skipped. Every
+  page now runs through Home.
+- The page addresses are unchanged by the move and now pinned: `/`,
+  `/How_the_pack_is_built`, `/Board_pack`, `/Your_own_data` and
+  `/How_its_built` each open the page they always opened.
+- The release checklist now requires a reboot of the live app right after
+  every push, then a look at all five pages; the reload code covers only the
+  gap between the push and the reboot.
+
+Outage history, for the record:
+
+| Push | What readers saw | Fixed by |
+|---|---|---|
+| v1.1.0 (`7b234e8`), 10 October 2026 | ImportError on two pages, How the pack is built and Board pack | A reboot of the app, 11 October 2026 |
+| v1.2.0 (`1248c6d`), 11 October 2026 | ImportError on three pages: "cannot import name 'CURRENCY' from 'config'" | `21c09d9`, 12 October 2026 (Home replaced stale modules) |
+| v1.2.1 (`fdeda3c`), 12 October 2026 | AttributeError on every page: `fresh.held()` missing from an older `fresh.py` | `4ad5fc0` (Home reloads `fresh.py`), released as v1.2.2 |
 
 ## v1.2.1
 

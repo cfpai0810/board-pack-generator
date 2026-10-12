@@ -19,19 +19,19 @@ state, and the version tag sits on the second.
    changed what users run.
 7. **Push both commits and the tag together**:
    `git push origin main vX.Y.Z`. Confirm CI is green on the tagged commit.
-8. **Reboot the app on Streamlit Cloud right after the push.** Streamlit
-   Cloud pulls the new code but keeps the old `config` and `src` modules
-   loaded: it reloads changed files only under `streamlit_app/`. v1.2.0
-   showed the result, an ImportError ("cannot import name 'CURRENCY' from
-   'config'") on the pages that used something new. Since v1.2.1 Home holds
-   each run against the loaded release (`streamlit_app/lib/fresh.py`): the
-   first run after a pull replaces the old modules, once and under a lock,
-   and each open session is reset on its next run, its edits kept, so the
-   pages recover on their own. The reboot (share.streamlit.io, the app's
-   menu, Reboot app) starts a clean process all the same, and is the fix if
-   a page still shows an ImportError. Keep the pages in
-   `streamlit_app/views/`: a folder named `pages/` beside Home.py lets
-   Streamlit run a page without Home, which skips that check.
+8. **Reboot the app on Streamlit Cloud right after every push, then open all
+   five pages**: Home, How the pack is built, Board pack, Your own data and
+   How it's built (share.streamlit.io, the app's menu, Reboot app). This is
+   required, not a fallback. Streamlit Cloud pulls a push into the running
+   process without restarting it, and keeps old modules loaded: v1.2.0's
+   pages failed with an ImportError ("cannot import name 'CURRENCY' from
+   'config'"), and v1.2.1's with an AttributeError (Home called `fresh.held()`
+   on an older copy of `fresh.py`). `streamlit_app/lib/fresh.py` covers the gap
+   between a push and the reboot, replacing old modules and resetting open
+   sessions, but it has caused one outage and proven itself once; the reboot
+   takes thirty seconds and does not depend on that code being right. Keep the
+   pages in `streamlit_app/views/`: a folder named `pages/` beside Home.py lets
+   Streamlit run a page without Home, which skips the check.
 9. **Check the live app**: every page at desktop and phone width; the sample
    built, edited and signed, with the downloaded PDF's SHA-256 equal to its
    rendered audit line and a clean code version; an own-file run; the worked
