@@ -223,8 +223,8 @@ def run_pipeline(
     then holds only the gross margin derived from the P&L, and the cash
     section says no cash balance was supplied. entity, period, cash_scale
     (CASH_UNITS: 1000 when the KPI file states cash in thousands, 1 in whole
-    units), currency (a code in CURRENCIES; labels only, nothing is
-    converted) and the thresholds left as None come from config, the sample.
+    units), currency (a code in CURRENCIES, a label only; nothing is converted)
+    and the thresholds left as None come from config, the sample.
     A currency other than the sample's needs its own absolute threshold.
     client=None drafts with the template.
 

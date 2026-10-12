@@ -206,7 +206,8 @@ streamlit run streamlit_app/Home.py
 ```
 
 The live demo runs on Streamlit Community Cloud from `streamlit_app/Home.py`
-with `requirements.txt` and Python 3.13. It needs no secrets.
+with `requirements.txt` and Python 3.13. It needs no secrets. After a release
+that changes `src/`, reboot it: see [docs/releasing.md](docs/releasing.md).
 
 ### API key
 
@@ -252,7 +253,7 @@ src/
 
 streamlit_app/
   Home.py                        Entry point, landing page, API key gate
-  pages/
+  views/
     1_How_the_pack_is_built.py   The method, for the reviewer
     2_Board_pack.py              The worked example, and a run of your own
     3_Your_own_data.py           The file formats, limits, privacy, running locally
@@ -267,6 +268,8 @@ data/                            The sample P&L and KPI files
 generated/                       The worked example and the test counts
 tests/                           test_pipeline.py (engine), test_web.py (web app)
 docs/glossary.md                 The project's terms, and the variants it retired
+docs/releasing.md                The release checklist, with the reboot after a push
+docs/release-notes.md            What each release changed
 output/                          Generated packs and audit logs (gitignored)
 ```
 

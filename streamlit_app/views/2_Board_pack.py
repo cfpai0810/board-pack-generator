@@ -1,5 +1,5 @@
 # =============================================================================
-# pages/2_Board_pack.py: the tool, from a draft to a signed pack
+# views/2_Board_pack.py: the tool, from a draft to a signed pack
 # =============================================================================
 # "Run it yourself":
 #   1. Inputs (W3): the source (the sample, or your own P&L CSV and optional
@@ -72,6 +72,7 @@ PACK, RESULT, ERROR, CONFIRM_NEW = "bp_pack", "bp_result", "bp_error", "bp_confi
 SAVED = "bp_saved"
 FOLDER, REVIEWER, SIGN = "bp_folder", "bp_reviewer", "bp_sign"
 BUILT_FROM, RUN_NOTES, CONFIRM_BUILD = "bp_built_from", "bp_run_notes", "bp_confirm_build"
+KEPT_EDITS = "bp_kept_edits"     # edits kept as plain strings when the app was updated (Home.py)
 
 # The form's inputs: their own prefix, so starting a new draft keeps them
 IN_SOURCE, IN_PNL, IN_KPIS = "in_source", "in_pnl", "in_kpis"
@@ -101,9 +102,14 @@ def _edits(pack) -> dict[str, str]:
             for s in pack.sections}
 
 
+def _final(pack) -> bool:
+    """A signed pack, judged by the status's value, so a pack the app built before an update still counts."""
+    return getattr(pack.status, "value", None) == PackStatus.FINAL.value
+
+
 def _unsaved(pack) -> bool:
     """Edits on screen that no review has recorded yet."""
-    if pack.status is PackStatus.FINAL:
+    if _final(pack):
         return False
     edits = _edits(pack)
     return any(edits[s.section_type.value] != s.narrative for s in pack.sections)
@@ -150,6 +156,7 @@ def _build() -> None:
         st.session_state[CONFIRM_BUILD] = True
         return
     inputs = _current_inputs()
+    kept = st.session_state.get(KEPT_EDITS, {})      # the reviewer's edits from before an update
     _reset()
     try:
         client = None
@@ -158,13 +165,16 @@ def _build() -> None:
         result = build_draft(inputs, _folder(), client=client)
     except Exception as exc:  # a reader never sees a traceback
         st.session_state[ERROR] = friendly_message(exc)
+        if kept:
+            st.session_state[KEPT_EDITS] = kept     # still kept for the next try
         return
     st.session_state[PACK] = result.pack
     st.session_state[BUILT_FROM] = inputs
     st.session_state[RUN_NOTES] = {"data": list(result.data_notes),
                                    "narrate": list(result.narrate_notices)}
     for section in result.pack.sections:
-        st.session_state[_edit_key(section.section_type.value)] = section.narrative
+        key = section.section_type.value
+        st.session_state[_edit_key(key)] = kept.get(key, section.narrative)
 
 
 def _keep_draft() -> None:
@@ -172,13 +182,17 @@ def _keep_draft() -> None:
 
 
 def _result_view(result) -> dict:
-    """What the page keeps of a run: strings and bytes only, never the figures themselves."""
+    """
+    What the page keeps of a run: plain strings and bytes only, never the
+    figures or an engine object, so a signed pack's downloads outlive an
+    update of the app.
+    """
     return {
         "status": result.pack.status.value.upper(),
         "pdf_name": result.pdf_path.name,
         "pdf": result.pdf_path.read_bytes(),
         "run_id": result.pack.run_id,
-        "notices": list(result.notices),
+        "notices": [str(notice) for notice in result.notices],
         "saved_at": result.saved_at,
     }
 
@@ -261,7 +275,7 @@ def _signed_line(pack) -> str:
 
 
 def _review_stage(pack, stale: bool = False) -> None:
-    final = pack.status is PackStatus.FINAL
+    final = _final(pack)
     chip = status_chip(pack.status.value)
     note = _signed_line(pack) if final else "Not signed off."
     st.markdown(f"{chip}&nbsp; {note}", unsafe_allow_html=True)
@@ -460,9 +474,10 @@ def _source_inputs() -> None:
     right.download_button("Sample KPI CSV", data=KPIS_PATH.read_bytes(), file_name="kpis.csv",
                           mime="text/csv", key="in_dl_kpis", on_click="ignore")
     st.markdown(
-        '<p class="bp-note">Amounts are written in the currency you choose; nothing is '
-        "converted. Your files are written only to this session's own temporary folder on "
-        "the server, read once to build the pack, then deleted.</p>", unsafe_allow_html=True)
+        '<p class="bp-note">Amounts are written in the currency you choose; '
+        "nothing is converted. Your files are written only to this session's own temporary "
+        "folder on the server, read once to build the pack, then deleted.</p>",
+        unsafe_allow_html=True)
 
 
 def _materiality_inputs() -> None:
@@ -547,7 +562,14 @@ with example_tab:
 
 with run_tab:
     pack = st.session_state.get(PACK)
+    signed = st.session_state.get(RESULT)
+    if pack is None and signed and signed.get("status") == "FINAL":
+        _final_downloads(None, signed)                  # signed before the app was updated
+        st.divider()
     if pack is None:
+        if st.session_state.get(KEPT_EDITS):
+            st.caption("Your edits from before the update are kept: they replace the new "
+                       "draft's text when you build it.")
         st.markdown("#### Build a draft")
         st.write(
             "Choose the files, the materiality thresholds and how the commentary is drafted. "

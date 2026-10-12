@@ -1,5 +1,5 @@
 # =============================================================================
-# pages/1_How_the_pack_is_built.py: the method, for a finance reader
+# views/1_How_the_pack_is_built.py: the method, for a finance reader
 # =============================================================================
 # For the reviewer, who signs the pack: what is computed, what a rule
 # decides, how variances read, why attribution is computed, what the
@@ -154,7 +154,7 @@ st.markdown(
     "Each review, and each PDF rendered, adds one line to an audit trail. The lines of one "
     "run share a run id, and the rendered line records the PDF's SHA-256, so the signed file "
     "can always be matched to its record.")
-st.page_link("pages/2_Board_pack.py", label="Board pack: a signed example, and a run of your own",
+st.page_link("views/2_Board_pack.py", label="Board pack: a signed example, and a run of your own",
              icon=":material/description:")
-st.page_link("pages/4_How_its_built.py", label="How it's built: the audit trail and what the "
+st.page_link("views/4_How_its_built.py", label="How it's built: the audit trail and what the "
              "model sees", icon=":material/build:")

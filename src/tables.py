@@ -223,8 +223,8 @@ def cash_note(pack: Pack) -> str:
     if pack.cash_scale == 1:
         return f"Stated in {name}, as in the KPI file."
     if pack.cash_scale == 1000:
-        return f"Converted to {name} from the KPI file, which states cash in thousands."
-    return f"Converted to {name} from the KPI file, at {pack.cash_scale:,} {name} per unit."
+        return f"Shown in whole {name}; the KPI file states cash in thousands."
+    return f"Shown in whole {name}; one unit in the KPI file is {pack.cash_scale:,} {name}."
 
 
 @dataclass(frozen=True)

@@ -18,18 +18,14 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# Before anything of the project's is imported: a release pulled into the
-# running app replaces the old modules on this run (lib/fresh.py).
-from streamlit_app.lib.fresh import drop_stale_modules, mark_loaded
+# Imports nothing of the project's: a release pulled into the running app
+# replaces the old modules before this run imports them (lib/fresh.py).
+from streamlit_app.lib import fresh
 
-drop_stale_modules(ROOT, clear_caches=lambda: (st.cache_data.clear(), st.cache_resource.clear()))
-
-from streamlit_app.lib.key_gate import render_key_gate
-from streamlit_app.lib.theme import header_html, inject_css
-
-mark_loaded(ROOT)
-
-PAGES_DIR = Path(__file__).resolve().parent / "pages"
+# The pages live in views/, not pages/: a folder named pages/ beside this
+# script would let Streamlit run a page without this script (its older
+# multipage mode), skipping the release check below.
+PAGES_DIR = Path(__file__).resolve().parent / "views"
 
 HOW_BUILT = st.Page(str(PAGES_DIR / "1_How_the_pack_is_built.py"),
                     title="How the pack is built", icon=":material/menu_book:")
@@ -42,6 +38,9 @@ HOW_ITS_BUILT = st.Page(str(PAGES_DIR / "4_How_its_built.py"),
 
 
 def _home_page():
+    from streamlit_app.lib.key_gate import render_key_gate
+    from streamlit_app.lib.theme import header_html, inject_css
+
     st.markdown(inject_css(), unsafe_allow_html=True)
     st.markdown(header_html(
         "Board Pack Generator",
@@ -83,11 +82,24 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-pg = st.navigation([
-    st.Page(_home_page, title="Home", icon=":material/home:", default=True),
-    HOW_BUILT,
-    BOARD_PACK,
-    OWN_DATA,
-    HOW_ITS_BUILT,
-])
-pg.run()
+
+
+def _clear_caches() -> None:
+    st.cache_data.clear()
+    st.cache_resource.clear()
+
+
+# The whole run, the page included, holds the loaded release: a purge waits
+# for it, and it waits for a purge, so it never meets a half-loaded module.
+with fresh.held(ROOT, clear_caches=_clear_caches) as generation:
+    if fresh.reset_stale_session(st.session_state, generation, pack_key="bp_pack",
+                                 edits_prefix="bp_edit_", kept_key="bp_kept_edits"):
+        st.info(fresh.UPDATED_NOTICE)
+    pg = st.navigation([
+        st.Page(_home_page, title="Home", icon=":material/home:", default=True),
+        HOW_BUILT,
+        BOARD_PACK,
+        OWN_DATA,
+        HOW_ITS_BUILT,
+    ])
+    pg.run()

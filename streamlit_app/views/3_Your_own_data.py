@@ -1,5 +1,5 @@
 # =============================================================================
-# pages/3_Your_own_data.py: the two CSV formats and running locally
+# views/3_Your_own_data.py: the two CSV formats and running locally
 # =============================================================================
 # The P&L and KPI file formats (columns from the loader, categories from the
 # engine, example rows read from the sample files), what happens to each
@@ -138,7 +138,7 @@ st.markdown(
     "to make the call, and never stored or logged. When the model (Claude, via the Anthropic API) drafts the "
     "commentary, it "
     "receives only the formatted figures and names in the pack facts, never your files.")
-st.page_link("pages/4_How_its_built.py",
+st.page_link("views/4_How_its_built.py",
              label="How it's built: exactly what the model receives for the sample",
              icon=":material/build:")
 
@@ -164,5 +164,5 @@ st.markdown(
     "`--cash-unit units` if the KPI file states cash in whole units; "
     "`python main.py --help` lists every option. The model is used only with `--use-model` "
     "and a key in the environment or a .env file, never one typed on the command line.")
-st.page_link("pages/2_Board_pack.py", label="Board pack: run your own files here instead",
+st.page_link("views/2_Board_pack.py", label="Board pack: run your own files here instead",
              icon=":material/description:")

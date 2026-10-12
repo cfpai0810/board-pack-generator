@@ -42,8 +42,8 @@ MARGIN_DP = 1                            # gross margin shown to 1 decimal place
 GROSS_MARGIN_KPI_METRIC = "Gross margin (%)"
 CASH_KPI_METRIC = "Cash balance (GBP 000s)"
 
-# The sample's cash KPI is stated in thousands; prose converts it to whole units
-# before formatting, so the raw thousands figure never reaches a sentence.
+# The sample's cash KPI is stated in thousands; prose multiplies it out to whole
+# units before formatting, so the raw thousands figure never reaches a sentence.
 CASH_KPI_SCALE = 1000
 
 # -- The model (step5, only when a client is injected) ------------------------
@@ -82,7 +82,7 @@ DIRECTION_PHRASES = (
 # the project is a git repository; otherwise this constant. Bump it whenever
 # a change could alter a figure or the commentary from the same inputs.
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # -- The repository -------------------------------------------------------------
 

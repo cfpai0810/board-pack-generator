@@ -36,9 +36,9 @@ pytest.importorskip("streamlit")
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 APP = ROOT / "streamlit_app"
-BOARD = "pages/2_Board_pack.py"
-PAGES = ["Home.py", "pages/1_How_the_pack_is_built.py", BOARD,
-         "pages/3_Your_own_data.py", "pages/4_How_its_built.py"]
+BOARD = "views/2_Board_pack.py"
+PAGES = ["Home.py", "views/1_How_the_pack_is_built.py", BOARD,
+         "views/3_Your_own_data.py", "views/4_How_its_built.py"]
 SECTIONS = ("exec_summary", "pnl", "kpis", "cash")
 REASON = " The Retail shortfall followed a fortnight's closure of the Leeds site."
 APPROX = "\u2248"
@@ -795,8 +795,8 @@ class TestUploadHandling:
 
 # ── W4: THE CONTENT PAGES AND THE WORKED EXAMPLE ───────────────────────
 
-CONTENT = ["pages/1_How_the_pack_is_built.py", "pages/3_Your_own_data.py",
-           "pages/4_How_its_built.py"]
+CONTENT = ["views/1_How_the_pack_is_built.py", "views/3_Your_own_data.py",
+           "views/4_How_its_built.py"]
 PLACEHOLDER = re.compile(r"will (show|explain|describe)|until then|placeholder|coming soon|"
                          r"\bTODO\b|\bW[1-5]\b|lorem", re.IGNORECASE)
 
@@ -856,7 +856,7 @@ class TestContentPages:
             assert not PLACEHOLDER.search(text), (script, PLACEHOLDER.search(text))
 
     def test_every_internal_link_works(self):
-        names = {Path(p).stem.split("_", 1)[1] for p in PAGES if p.startswith("pages/")}
+        names = {Path(p).stem.split("_", 1)[1] for p in PAGES if p.startswith("views/")}
         seen = set()
         for script in PAGES:
             for link in _page(script).get("page_link"):
@@ -869,7 +869,7 @@ class TestContentPages:
     def test_no_sample_figure_is_typed_into_a_page(self):
         figures = _sample_figures()
         assert {"50,000", "£50,000", "10.0%", "193,120", "£2.48m", "six material"} <= figures
-        sources = [APP / "Home.py", *(APP / "pages").glob("*.py"), *(APP / "lib").glob("*.py")]
+        sources = [APP / "Home.py", *(APP / "views").glob("*.py"), *(APP / "lib").glob("*.py")]
         for path in sources:
             for text in _string_constants(path):
                 for figure in figures:
@@ -1031,9 +1031,10 @@ class TestCurrencyChoice:
 class TestFreshModules:
     """
     Streamlit Cloud pulls a release without restarting Python and reloads only
-    streamlit_app/; Home drops the project's older modules so the run imports
-    the release on disk. Tested on a stand-in project and module table, so the
-    test process's own modules are never touched.
+    streamlit_app/; Home holds the loaded release for each run, and the first
+    run to find it stale purges it, once, under a lock. Tested on a stand-in
+    project and module table, so the test process's own modules are never
+    touched.
     """
 
     def _project(self, root: Path, version: str) -> Path:
@@ -1059,41 +1060,252 @@ class TestFreshModules:
             "__main__": module("__main__", root / "streamlit_app" / "Home.py"),
         }
 
-    def test_an_older_release_in_memory_is_dropped_and_the_caches_cleared(self, tmp_path):
-        from streamlit_app.lib.fresh import drop_stale_modules
-        root = self._project(tmp_path / "app", "1.2.0")
-        modules, cleared = self._loaded(root, "1.1.0"), []
-        dropped = drop_stale_modules(root, modules, lambda: cleared.append(True))
-        assert sorted(dropped) == ["config", "src.pipeline", "streamlit_app.lib.content"]
-        assert sorted(modules) == ["__main__", "reportlab"] and cleared == [True]
+    def _hold(self, root, modules, release, cleared=None, **kw):
+        from streamlit_app.lib.fresh import held
+        return held(root, modules=modules, release=release, engine=(),
+                    clear_caches=None if cleared is None else lambda: cleared.append(1), **kw)
+
+    def test_an_older_release_in_memory_is_purged_and_the_caches_cleared(self, tmp_path):
+        from streamlit_app.lib.fresh import Release
+        root = self._project(tmp_path / "app", "1.2.1")
+        modules, release, cleared = self._loaded(root, "1.2.0"), Release(), []
+        with self._hold(root, modules, release, cleared) as generation:
+            assert sorted(modules) == ["__main__", "reportlab"]
+        assert generation == release.generation == 1 and cleared == [1]
+        assert release.readers == 0 and release.stamp is not None
 
     def test_the_release_on_disk_is_kept(self, tmp_path):
-        from streamlit_app.lib.fresh import LOADED_STAMP, drop_stale_modules
-        root = self._project(tmp_path / "app", "1.2.0")
-        modules = self._loaded(root, "1.2.0")
-        assert drop_stale_modules(root, modules, lambda: pytest.fail("no caches to clear")) == []
-        assert len(modules) == 5 and getattr(modules["config"], LOADED_STAMP) > 0
+        from streamlit_app.lib.fresh import Release
+        root = self._project(tmp_path / "app", "1.2.1")
+        modules, release, cleared = self._loaded(root, "1.2.1"), Release(), []
+        with self._hold(root, modules, release, cleared) as generation:
+            pass
+        assert generation == 0 and cleared == [] and len(modules) == 5
+        assert release.stamp is not None                  # recorded for the next change
 
-    def test_a_file_pulled_after_loading_drops_the_modules(self, tmp_path):
+    def test_a_file_pulled_after_loading_purges_once(self, tmp_path):
         import os
-        from streamlit_app.lib.fresh import drop_stale_modules, mark_loaded
-        root = self._project(tmp_path / "app", "1.2.0")
-        modules = self._loaded(root, "1.2.0")
-        mark_loaded(root, modules)
-        assert drop_stale_modules(root, modules) == []
+        from streamlit_app.lib.fresh import Release
+        root = self._project(tmp_path / "app", "1.2.1")
+        modules, release, cleared = self._loaded(root, "1.2.1"), Release(), []
+        with self._hold(root, modules, release, cleared):
+            pass
         later = (root / "src" / "pipeline.py").stat().st_mtime + 60
         os.utime(root / "src" / "pipeline.py", (later, later))    # the next release, same VERSION
-        assert "src.pipeline" in drop_stale_modules(root, modules)
+        modules.update(self._loaded(root, "1.2.1"))
+        for _ in range(3):
+            with self._hold(root, modules, release, cleared):
+                pass
+        assert cleared == [1] and release.generation == 1          # once per change
 
-    def test_nothing_loaded_yet_is_nothing_to_drop(self, tmp_path):
-        from streamlit_app.lib.fresh import drop_stale_modules
-        root = self._project(tmp_path / "app", "1.2.0")
-        assert drop_stale_modules(root, {}) == []
+    def test_a_new_version_copied_with_old_file_times_still_purges(self, tmp_path):
+        from streamlit_app.lib.fresh import Release, files_stamp
+        root = self._project(tmp_path / "app", "1.2.1")
+        modules, release, cleared = self._loaded(root, "1.2.0"), Release(), []
+        release.stamp = files_stamp(root) + 10 ** 12     # as if loaded after every file's time
+        with self._hold(root, modules, release, cleared):
+            pass
+        assert cleared == [1] and release.generation == 1
 
-    def test_home_checks_before_it_imports_anything_of_the_projects(self):
+    def test_nothing_loaded_yet_is_nothing_to_purge(self, tmp_path):
+        from streamlit_app.lib.fresh import Release
+        root = self._project(tmp_path / "app", "1.2.1")
+        release, cleared = Release(), []
+        with self._hold(root, {}, release, cleared) as generation:
+            pass
+        assert generation == 0 and cleared == []
+
+    def test_two_runs_that_find_the_same_change_purge_once(self, tmp_path):
+        import threading
+        from streamlit_app.lib.fresh import Release
+        root = self._project(tmp_path / "app", "1.2.1")
+        modules, release, cleared = self._loaded(root, "1.2.0"), Release(), []
+        start = threading.Barrier(4)
+
+        def run():
+            start.wait()
+            with self._hold(root, modules, release, cleared):
+                pass
+        threads = [threading.Thread(target=run) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(10)
+        assert cleared == [1] and release.generation == 1 and release.readers == 0
+
+    def test_a_purge_waits_for_a_run_under_way_and_new_runs_wait_for_the_purge(self, tmp_path):
+        import threading
+        from streamlit_app.lib.fresh import Release
+        root = self._project(tmp_path / "app", "1.2.1")
+        modules, release, order = self._loaded(root, "1.2.1"), Release(), []
+        with self._hold(root, modules, release):
+            pass                                         # loaded and stamped: current
+        inside, finish = threading.Event(), threading.Event()
+
+        def run_under_way():
+            with self._hold(root, modules, release):
+                inside.set()
+                finish.wait(10)
+                order.append("run under way ends")
+
+        def slow_purge():
+            order.append("purge")
+
+        def purging_run():
+            with held_with(slow_purge) as generation:
+                order.append(f"purging run, generation {generation}")
+
+        from streamlit_app.lib.fresh import held
+
+        def held_with(clear):
+            return held(root, modules=modules, release=release, engine=(), clear_caches=clear)
+
+        def arriving_run():
+            with held_with(None) as generation:
+                order.append(f"arriving run, generation {generation}")
+
+        first = threading.Thread(target=run_under_way)
+        first.start()
+        inside.wait(10)
+        import os
+        later = (root / "config.py").stat().st_mtime + 60
+        os.utime(root / "config.py", (later, later))
+        modules.update(self._loaded(root, "1.2.1"))
+        purger = threading.Thread(target=purging_run)
+        purger.start()
+        threading.Event().wait(0.3)                      # the purge is now waiting on the first run
+        late = threading.Thread(target=arriving_run)
+        late.start()
+        threading.Event().wait(0.3)
+        assert order == []                               # nothing purged, nothing let in yet
+        finish.set()
+        for t in (first, purger, late):
+            t.join(10)
+        assert order[:2] == ["run under way ends", "purge"]
+        assert sorted(order[2:]) == ["arriving run, generation 1", "purging run, generation 1"]
+
+    def test_a_session_from_before_the_update_is_reset_and_keeps_its_edits(self):
+        from streamlit_app.lib.fresh import SESSION_RELEASE, reset_stale_session
+        OldPack = type("Pack", (), {"__module__": "src.state"})
+        Note = type("Note", (str,), {"__module__": "src.notes"})
+        state = {SESSION_RELEASE: 0, "bp_pack": OldPack(), "bp_run_notes": {"data": [Note("n")]},
+                 "bp_edit_exec_summary": "Revenue fell. Two customers moved orders.",
+                 "bp_result": {"status": "FINAL", "pdf": b"%PDF", "pdf_name": "x.pdf",
+                               "run_id": "r1", "notices": []},
+                 "bp_reviewer": "A. Controller", "in_entity": "Test Co"}
+        assert reset_stale_session(state, 1, pack_key="bp_pack", edits_prefix="bp_edit_",
+                                   kept_key="bp_kept_edits")
+        assert "bp_pack" not in state and "bp_run_notes" not in state
+        assert state["bp_kept_edits"] == {"exec_summary": "Revenue fell. Two customers moved orders."}
+        assert type(state["bp_kept_edits"]["exec_summary"]) is str
+        assert state["bp_result"]["pdf"] == b"%PDF" and state["in_entity"] == "Test Co"
+        assert not reset_stale_session(state, 1, pack_key="bp_pack", edits_prefix="bp_edit_",
+                                       kept_key="bp_kept_edits")
+        fresh_session = {}
+        assert not reset_stale_session(fresh_session, 1, pack_key="bp_pack",
+                                       edits_prefix="bp_edit_", kept_key="bp_kept_edits")
+        assert fresh_session == {SESSION_RELEASE: 1}
+
+    def test_a_session_from_before_this_check_is_reset_too(self):
+        """Sessions that began under the previous release recorded no generation at all."""
+        from streamlit_app.lib.fresh import SESSION_RELEASE, reset_stale_session
+        OldPack = type("Pack", (), {"__module__": "src.state"})
+        state = {"bp_pack": OldPack(), "bp_edit_cash": "Cash was flat. The bank paid late."}
+        assert reset_stale_session(state, 1, pack_key="bp_pack", edits_prefix="bp_edit_",
+                                   kept_key="bp_kept_edits")
+        assert state == {SESSION_RELEASE: 1,
+                         "bp_kept_edits": {"cash": "Cash was flat. The bank paid late."}}
+        untouched = {"bp_pack": OldPack()}                # no purge yet: nothing is stale
+        assert not reset_stale_session(untouched, 0, pack_key="bp_pack", edits_prefix="bp_edit_",
+                                       kept_key="bp_kept_edits")
+        assert "bp_pack" in untouched
+
+    def test_a_signed_pack_with_no_edit_boxes_keeps_only_the_edited_sections(self):
+        from types import SimpleNamespace as NS
+        from streamlit_app.lib.fresh import SESSION_RELEASE, reset_stale_session
+        OldPack = type("Pack", (), {"__module__": "src.state"})
+        pack = OldPack()
+        pack.sections = [
+            NS(section_type=NS(value="exec_summary"), draft="Revenue fell.",
+               narrative="Revenue fell. Two customers moved orders."),
+            NS(section_type=NS(value="cash"), draft="Cash was flat.", narrative="Cash was flat."),
+        ]
+        state = {SESSION_RELEASE: 0, "bp_pack": pack}
+        assert reset_stale_session(state, 1, pack_key="bp_pack", edits_prefix="bp_edit_",
+                                   kept_key="bp_kept_edits")
+        assert state == {SESSION_RELEASE: 1, "bp_kept_edits": {
+            "exec_summary": "Revenue fell. Two customers moved orders."}}
+
+    def test_no_pages_folder_beside_home(self):
+        """
+        A folder named pages/ beside Home.py lets Streamlit run a page without
+        Home (its older multipage mode, chosen when a process's first request is
+        a page), and the release check and the session reset would be skipped.
+        """
+        assert not (APP / "pages").exists() and (APP / "views" / "2_Board_pack.py").is_file()
+
+    def test_home_runs_every_page_inside_the_held_release(self):
         source = (ROOT / "streamlit_app" / "Home.py").read_text(encoding="utf-8")
-        check = source.index("drop_stale_modules(ROOT")
-        first_own = min(source.index(s) for s in ("from streamlit_app.lib.key_gate",
-                                                    "from streamlit_app.lib.theme", "from config",
-                                                    "from src") if s in source)
-        assert check < first_own
+        held_at, run_at = source.index("with fresh.held(ROOT"), source.index("    pg.run()")
+        assert held_at < run_at
+        module_level = [line for line in source.splitlines()
+                        if line.startswith(("from config", "from src", "from streamlit_app"))]
+        assert module_level == ["from streamlit_app.lib import fresh"]
+
+
+class TestSignedPackAcrossAnUpdate:
+    """A FINAL pack in a session when the app is updated: never editable, never signed again."""
+
+    def _signed_through_home(self, edit=None) -> AppTest:
+        """The sample signed on the Board pack page, reached through Home, which runs on every view."""
+        at = _page(BOARD)
+        at.button(key="bp_run").click().run()
+        assert not at.exception, at.exception
+        if edit is not None:
+            _edit(at, "exec_summary", edit)
+        _final_pdf(at)
+        return at
+
+    def test_the_signed_pack_is_set_aside_its_downloads_stay_and_edits_are_kept(self):
+        from enum import Enum
+        from streamlit_app.lib.fresh import UPDATED_NOTICE, process_release
+        at = self._signed_through_home(lambda t: t + " Two retail customers moved orders into July.")
+        assert at.session_state["bp_pack"].status.value == "final"
+        # What the session holds after an update: the same pack, its status from the old classes
+        old = Enum("PackStatus", {"DRAFT": "draft", "FINAL": "final"}, module="src.state")
+        at.session_state["bp_pack"].status = old.FINAL
+        release = process_release()
+        release.generation += 1                           # the update, as the session meets it
+        try:
+            self._after_the_update(at, UPDATED_NOTICE)
+        finally:
+            release.generation -= 1
+
+    def _after_the_update(self, at, notice) -> None:
+        at.run()
+        assert not at.exception, at.exception
+        assert "bp_pack" not in at.session_state
+        assert [t.key for t in at.text_area if str(t.key).startswith("bp_edit_")] == []
+        assert "bp_signoff" not in [b.key for b in at.button]          # Sign off cannot run
+        assert [i.value for i in at.info] == [notice]
+        labels = [d.label for d in _downloads(at)]
+        assert "Download the FINAL PDF" in labels and "Download this pack's audit lines (.jsonl)" in labels
+        kept = at.session_state["bp_kept_edits"]["exec_summary"]
+        assert type(kept) is str and kept.endswith("Two retail customers moved orders into July.")
+        # Built again: a new DRAFT, with the reviewer's edit back in its box
+        at.button(key="bp_run").click().run()
+        assert not at.exception, at.exception
+        assert at.session_state["bp_pack"].status.value == "draft"
+        assert at.text_area(key="bp_edit_exec_summary").value == kept
+        assert "bp_kept_edits" not in at.session_state
+
+    def test_the_engine_refuses_to_sign_an_old_signed_pack_again(self, tmp_path):
+        from enum import Enum
+        from src.pipeline import review_and_save
+        from src.step6_review import AlreadySignedOff
+        at = _drafted()
+        _final_pdf(at)
+        pack = at.session_state["bp_pack"]
+        pack.status = Enum("PackStatus", {"DRAFT": "draft", "FINAL": "final"}).FINAL
+        with pytest.raises(AlreadySignedOff):
+            review_and_save(pack, tmp_path, edits={}, reviewer="Someone Else", sign_word="SIGN")

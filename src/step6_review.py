@@ -498,8 +498,12 @@ def audit_text(output_dir: Path, run_id: Optional[str] = None) -> str:
 
 
 def _start_run(pack: Pack, now: Optional[str] = None) -> str:
-    """Refuse a FINAL pack, start a new run, keep the first draft text. Returns the run time."""
-    if pack.status is PackStatus.FINAL:
+    """
+    Refuse a FINAL pack, start a new run, keep the first draft text. Returns
+    the run time. FINAL is judged by the status's value, so a pack built by an
+    earlier load of the code (a web session across an update) is refused too.
+    """
+    if getattr(pack.status, "value", None) == PackStatus.FINAL.value:
         raise AlreadySignedOff(
             "This pack is already signed off (FINAL). A signed pack is changed "
             "by a new run, not by editing."

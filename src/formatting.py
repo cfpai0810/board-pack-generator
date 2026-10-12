@@ -12,11 +12,11 @@ words (above budget, below last year, a loss of) rather than minus signs,
 and a figure that rounds to nothing reads as nothing ("0.0%", never
 "-0.0%"; "in line with budget"). Tables keep whole units. The cash KPI is
 stated in thousands or in whole units (the run says which), and is
-converted to whole units before it is formatted; a raw thousands figure
-never reaches a sentence.
+multiplied out to whole units before it is formatted; a raw thousands
+figure never reaches a sentence.
 
-Currency: one per pack, chosen for the run from CURRENCIES, and never
-converted. Every money helper takes the pack's currency code and writes its
+Currency: one per pack, chosen for the run from CURRENCIES; nothing is converted.
+Every money helper takes the pack's currency code and writes its
 prefix before the number, with commas for thousands: '£2.48m', '€112k',
 'CHF 2.48m'. A currency whose sign the PDF's standard fonts cannot print is
 written with its ISO code, as CHF is here.

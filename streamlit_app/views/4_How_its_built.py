@@ -1,5 +1,5 @@
 # =============================================================================
-# pages/4_How_its_built.py: the pipeline, the tests, the audit trail, the limits
+# views/4_How_its_built.py: the pipeline, the tests, the audit trail, the limits
 # =============================================================================
 # The technical and governance story for a finance reader: the seven steps
 # and what each owns, the test counts (written by the test run), the
@@ -130,6 +130,6 @@ st.markdown(
     "- **The model adds little.** Once the figures, the selection and the attribution are "
     "computed, the model's wording adds little that the template does not. That is why the "
     "template is the default and the model an option.")
-st.page_link("pages/1_How_the_pack_is_built.py",
+st.page_link("views/1_How_the_pack_is_built.py",
              label="How the pack is built: the method, for the reviewer",
              icon=":material/menu_book:")

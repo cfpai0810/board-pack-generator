@@ -2663,7 +2663,7 @@ class TestSharedTables:
         text = _flat(_pdf_pages(final_pdf))
         for note in [*notes, DRIVERS_NOTE, KPI_NOTE, cash_note(pack)]:
             assert note in text, note
-        assert cash_note(pack) == ("Converted to pounds from the KPI file, which states "
+        assert cash_note(pack) == ("Shown in whole pounds; the KPI file states "
                                    "cash in thousands.")
 
     def test_the_pdf_draws_the_shared_rows(self, final_pack):
@@ -3774,11 +3774,13 @@ RETIRED = {
         r"\bClaude\b(?!, via the Anthropic API)",
     "a typed model id (it comes from config)": r"claude-(sonnet|opus|haiku|fable)-\d",
     "finance team (say the reviewer)": r"\bfinance team\b",
+    "converted (say shown in whole units; only nothing is converted)":
+        r"(?i)\bconvert(s|ed|ing|ion)?\b",
     "pounds only (one currency is chosen per run)":
         r"(?i)\bpounds sterling\b|\bpounds only\b|\b(treated|read) as pounds\b|\ba pound sign\b",
 }
 ALLOWED = ("A. Controller", "AI Variance Commentary Engine", "AI Governance Playbook",
-           "Planning-to-Warehouse-to-LLM Pipeline")
+           "Planning-to-Warehouse-to-LLM Pipeline", "nothing is converted", "never converted")
 
 
 def _reader_text(path: Path, *, docs_only: bool = False) -> list[tuple[int, str]]:
@@ -3808,12 +3810,13 @@ def _reader_files() -> list[Path]:
     patterns = ("README.md", "docs/*.md", "main.py", "config.py", "src/*.py",
                 "streamlit_app/*.py", "streamlit_app/*/*.py", "scripts/*.py")
     files = [p for pattern in patterns for p in sorted(ROOT.glob(pattern))]
-    return [p for p in files if p.name != "glossary.md"]      # it lists the variants on purpose
+    # the glossary lists the retired variants on purpose; the release notes record them
+    return [p for p in files if p.name not in ("glossary.md", "release-notes.md")]
 
 
 def _retired(text: str, *, model_id_allowed: bool = False) -> list[str]:
     for name in ALLOWED:
-        text = text.replace(name, "")
+        text = re.sub(re.escape(name), "", text, flags=re.IGNORECASE)
     return [f"{name}: {m.group(0)!r}" for name, pattern in RETIRED.items()
             if not (model_id_allowed and name.startswith("a typed model id"))
             for m in re.finditer(pattern, text)]
@@ -3871,10 +3874,10 @@ class TestGlossary:
 
     @pytest.mark.parametrize("name", ["README.md", "main.py", "streamlit_app/Home.py",
                                       "streamlit_app/lib/key_gate.py",
-                                      "streamlit_app/pages/1_How_the_pack_is_built.py",
-                                      "streamlit_app/pages/2_Board_pack.py",
-                                      "streamlit_app/pages/3_Your_own_data.py",
-                                      "streamlit_app/pages/4_How_its_built.py"])
+                                      "streamlit_app/views/1_How_the_pack_is_built.py",
+                                      "streamlit_app/views/2_Board_pack.py",
+                                      "streamlit_app/views/3_Your_own_data.py",
+                                      "streamlit_app/views/4_How_its_built.py"])
     def test_the_first_mention_of_the_model_says_what_it_is(self, name):
         path = ROOT / name
         pieces = [text for _, text in _reader_text(path)
@@ -4004,7 +4007,8 @@ class TestCurrency:
             "Cash: the KPI name 'Cash balance (USD 000s)' suggests US dollars, but the pack is "
             "in euros. Check the currency chosen for the run."]
         assert [n.kind for n in result.data_notes] == ["cash_currency_hint"]
-        assert "Converted to euros from the KPI file" in _flat(_pdf_pages(result.pdf_path.read_bytes()))
+        assert ("Shown in whole euros; the KPI file states cash in thousands."
+                in _flat(_pdf_pages(result.pdf_path.read_bytes())))
 
     def test_the_cash_unit_and_currency_are_read_from_any_name(self):
         from src.step4_assemble import currency_hint, unit_hint
@@ -4066,6 +4070,49 @@ def _clashes(drawing) -> list:
     return found
 
 
+def _tile_lines(text: str, size: float) -> int:
+    """How many lines a tile's comparison line takes at size, wrapped as the PDF wraps it."""
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import Paragraph
+    from src import step7_render as r
+    style = ParagraphStyle("t", parent=r._TILE_VERSUS, fontSize=size, leading=size + 1.5)
+    para = Paragraph(text, style)
+    para.wrap(r.tile_room(), 1000)
+    return len(para.blPara.lines)
+
+
+def _tables_in(flowables) -> list:
+    """Every reportlab Table in a list of flowables, including tables inside table cells."""
+    from reportlab.platypus import KeepTogether, Table
+    found = []
+    for f in flowables:
+        if isinstance(f, KeepTogether):
+            found += _tables_in(f._content)
+        elif isinstance(f, Table):
+            found.append(f)
+            for row in f._cellvalues:
+                for cell in row:
+                    if isinstance(cell, list):
+                        found += _tables_in(cell)
+    return found
+
+
+def _broken_driver_names(pack) -> list:
+    """Driver line names with a word wider than their column: the PDF would break it inside."""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    from reportlab.platypus import Paragraph
+    from src import step7_render as r
+    found = []
+    for table in _tables_in(r._evidence(pack)):
+        if table._cellvalues[0][0] != "Subtotal":
+            continue
+        room = table._colWidths[1] - 12
+        for row in table._cellvalues[2:]:
+            name = row[1].text if isinstance(row[1], Paragraph) else row[1]
+            found += [word for word in name.split() if stringWidth(word, "Helvetica", 8) > room]
+    return found
+
+
 def _misfits(pack) -> list:
     """Every chart label, tile line and P&L cell that would not fit, for one pack."""
     from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -4078,10 +4125,12 @@ def _misfits(pack) -> list:
         found += [("cash", clash) for clash in _clashes(r._cash(pack))]
     tiles = headline_tiles(pack)
     size = r.tile_versus_size(tiles)
+    found += [("tile size", size)] if size < r.TILE_MIN_SIZE else []
     found += [("tile", line) for t in tiles for line in (t.budget, t.last_year)
-              if stringWidth(line, "Helvetica", size) > r.tile_room()]
+              if _tile_lines(line, size) > 2]
     found += [("tile value", t.value) for t in tiles
               if stringWidth(t.value, "Helvetica-Bold", 15) > r.tile_room()]
+    found += [("drivers", word) for word in _broken_driver_names(pack)]
     cells = [pnl_header(pack.currency)[1][1:]] + [row.cells for row in pnl_rows(pack)]
     _, widths, font = r._pnl_layout(cells)
     found += [("P&L", cell) for row in cells for cell, width in zip(row, widths)
@@ -4106,6 +4155,26 @@ class TestFit:
     def test_the_sample_fits_in_every_currency(self, code):
         assert _misfits(_narrated_sample(currency=code)) == []
 
+    @pytest.mark.parametrize("scale", [190, 2000])
+    @pytest.mark.parametrize("code", ["GBP", "EUR", "USD", "CHF"])
+    def test_every_currency_fits_at_large_scale(self, tmp_path, code, scale):
+        """The yen cases above, in the other currencies: CHF, written with its code, is the widest."""
+        pack = _own_run(tmp_path, pnl=_scaled_pnl(tmp_path, scale), kpis=None, currency=code,
+                        materiality_abs=Decimal("10000000"), entity="K", period="June 2026").pack
+        assert _misfits(pack) == []
+
+    def test_a_wide_bridge_goes_above_the_drivers_rather_than_squeeze_them(self, tmp_path):
+        from src import step7_render as r
+        from src.tables import drivers_header
+        small = _narrated_sample(currency="CHF")
+        assert r._bridge_width(small) == r._CHART_W
+        large = _own_run(tmp_path, pnl=_scaled_pnl(tmp_path, 2000), kpis=None, currency="CHF",
+                         materiality_abs=Decimal("10000000"), entity="K", period="June 2026").pack
+        assert r._CHART_W < r._bridge_width(large) <= r._CHART_W_MAX
+        drivers = [t for t in _tables_in(r._evidence(large))
+                   if t._cellvalues[0][0] == drivers_header("CHF")[0][0]]
+        assert len(drivers) == 1 and sum(drivers[0]._colWidths) == pytest.approx(13.2 * 28.3465, abs=0.1)
+
     def test_wide_figures_take_room_from_the_labels_not_the_type(self, tmp_path):
         from src import step7_render as r
         from src.tables import pnl_header, pnl_rows
@@ -4119,11 +4188,39 @@ class TestFit:
         label, _, size = layout(pack)
         assert label < r._PNL_LABEL_W and size == 8
 
-    def test_a_long_tile_line_steps_down_rather_than_wrap(self):
+    def test_a_long_tile_line_steps_down_to_7pt_and_no_further(self):
         from src import step7_render as r
         from src.tables import headline_tiles
         assert r.tile_versus_size(headline_tiles(_narrated_sample())) == 7.5
         assert r.tile_versus_size(headline_tiles(_narrated_sample(currency="CHF"))) == 7
+        assert r.TILE_MIN_SIZE == 7
+
+    @pytest.mark.parametrize("scale", [1, 2000])
+    def test_no_tile_text_is_below_7pt(self, tmp_path, scale):
+        from src import step7_render as r
+        pack = (_narrated_sample(currency="CHF") if scale == 1 else
+                _own_run(tmp_path, pnl=_scaled_pnl(tmp_path, scale), kpis=None, currency="CHF",
+                         materiality_abs=Decimal("10000000"), entity="K", period="June 2026").pack)
+        sizes = [p.style.fontSize for cell in r._tiles(pack)._cellvalues[0] for p in cell]
+        assert len(sizes) == 16 and min(sizes) >= r.TILE_MIN_SIZE
+
+    def test_a_line_too_long_at_7pt_wraps_and_the_tiles_keep_one_height(self, tmp_path):
+        """In Swiss francs at 2,000 times the sample, 'CHF 256.54m (5.5%) above last year' wraps."""
+        from src import step7_render as r
+        from src.tables import headline_tiles
+        pack = _own_run(tmp_path, pnl=_scaled_pnl(tmp_path, 2000), kpis=None, currency="CHF",
+                        materiality_abs=Decimal("10000000"), entity="K", period="June 2026").pack
+        tiles = headline_tiles(pack)
+        assert r.tile_versus_size(tiles) == 7
+        lines = {text: _tile_lines(text, 7) for t in tiles for text in (t.budget, t.last_year)}
+        assert "CHF 256.54m (5.5%) above last year" in lines
+        assert max(lines.values()) == 2
+        table = r._tiles(pack)
+        table.wrap(r.BODY_W, 1000)
+        assert len(table._cellvalues) == 1 and len(table._rowHeights) == 1   # one row, one height
+        assert ("BACKGROUND", (0, 0), (-1, -1), r.PANEL) in table._bkgrndcmds or any(
+            cmd[0] == "BACKGROUND" and cmd[1] == (0, 0) and cmd[2] == (-1, -1)
+            for cmd in table._bkgrndcmds)
 
 
 class TestPublishedCommands:

@@ -33,7 +33,7 @@ worded, the model read a cost overspend as an offset or set it in
 contrast. Both paths now say what moved and by how much, nothing more.
 
 The soft numeric check runs after either path. Every numeric token in the
-prose is read with its unit, converted to base units (whole units of money, percent,
+prose is read with its unit and expressed in base units (whole units of money, percent,
 points) and matched by MAGNITUDE (prose carries direction words, not
 signs) against every figure the pack holds. A token matches if a figure
 rounds to it at the token's own precision, so "about £2.5m" matches
@@ -308,7 +308,7 @@ def template_sections(facts: dict) -> dict[str, str]:
 _SYSTEM_PROMPT = """You draft the commentary for a monthly board pack. Every figure has already been computed and checked. Your job is to put the figures you are given into clear, plain prose.
 
 Rules:
-1. Use only the figures in the facts you are given, and quote each one exactly as it is written there, for example "{example}", "4.3%" or "4.1 pts". Do not introduce any other number. Do not recalculate, combine, re-round or convert a figure.
+1. Use only the figures in the facts you are given, and quote each one exactly as it is written there, for example "{example}", "4.3%" or "4.1 pts". Do not introduce any other number. Do not recalculate, combine or re-round a figure, and do not restate it in another unit or currency.
 2. Say what moved and by how much. Do not say which lines drove a movement or which lines offset it: that attribution is computed and shown in a table beside the summary.
 3. Do not state, guess or imply why anything moved. The reviewer adds the reasons at review. Avoid words that introduce a cause, such as "because", "due to", "as a result of" or "reflecting".
 4. Write direction in words, as the facts do ("above budget", "below last year", "a loss of"). Never write a minus sign.
@@ -462,7 +462,7 @@ _EXPONENT = {"k": 3, "thousand": 3, "m": 6, "million": 6, "bn": 9, "billion": 9}
 def comparison_set(pack: Pack) -> dict[str, set[Decimal]]:
     """
     Every figure the pack holds, as magnitudes in base units, by kind:
-    money (whole units, cash converted from thousands), percent, points, and
+    money (whole units, cash multiplied out from thousands), percent, points, and
     plain KPI figures. Driver impacts are the lines' own budget variances,
     so they are already present. The materiality thresholds are included
     because the summary may state them.

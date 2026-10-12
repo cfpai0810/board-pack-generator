@@ -68,7 +68,12 @@ or CHF. Every amount is written in it, the sign before the number and commas
 for thousands: "€2.48m", "(€112k)", "CHF 2.48m". A currency whose sign the
 PDF's standard fonts cannot print is written with its ISO code, as CHF is.
 Nothing is converted. In prose the currency's name is plural: "stated in
-euros". The cash KPI is stated in "thousands" or "whole units".
+euros". The cash KPI is stated in "thousands" or "whole units", and the note
+under the cash table says how it is shown: "Shown in whole Swiss francs; the
+KPI file states cash in thousands."
+
+"Converted" is retired in every form, so a reader never takes a change of
+unit for a change of currency. It appears only as "nothing is converted".
 
 Retired: "pounds sterling only", "pounds only", "treated as pounds" and "a
 pound sign" for amounts in general. Pounds are named only for the Harmwell

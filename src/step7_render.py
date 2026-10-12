@@ -445,11 +445,25 @@ BRIDGE_CAPTION = ("From budget EBIT to actual EBIT. Each step is that part of th
 EFFECTS_TITLE = "Each line's effect on profit against budget"
 EFFECTS_CAPTION = ("Largest first, each with its part of the P&L: to the left of the line "
                    "lowered profit, to the right raised it. Material lines are dark and marked *.")
-_CHART_W = 8.3 * cm
+_CHART_W = 8.3 * cm             # the bridge's column beside the drivers table, widened to at most:
+_CHART_W_MAX = 11 * cm
+
+
+def _bridge_width(pack: Pack) -> float:
+    """
+    The bridge's column: 8.3cm, or wider when its longest label would not fit
+    its step ('(CHF 224.90m)' in a large Swiss franc pack), so no two labels
+    meet and none runs off the chart; at most 11cm, and the drivers table
+    beside it takes what is left.
+    """
+    steps = ebit_walk(pack)
+    widest = max(stringWidth(signed_money(s.value, pack.currency), "Helvetica-Bold", 7.5)
+                 for s in steps)
+    return max(_CHART_W, min(_CHART_W_MAX, (widest + 4) * len(steps) + 12))     # a 4pt gap
 
 
 def _bridge(pack: Pack) -> Drawing:
-    return _walk_chart(pack, Decimal(str(_CHART_W - 12)), Decimal(170))
+    return _walk_chart(pack, Decimal(str(_bridge_width(pack) - 12)), Decimal(170))
 
 
 def _effects(pack: Pack) -> Drawing:
@@ -513,13 +527,21 @@ def _evidence(pack: Pack) -> list:
     The summary's evidence, side by side: the bridge from budget to actual
     EBIT (by revenue, COGS and opex) and the drivers table (by line). With
     no material profit subtotal there are no drivers, and the bridge stands
-    alone.
+    alone. A bridge whose labels need more than its usual column (a large
+    pack in a currency written with its code) goes above the drivers table
+    instead, so neither is squeezed: the drivers keep their own width and
+    their line names never break inside a word.
     """
     walk = [_para(BRIDGE_TITLE, _H3), _bridge(pack), _para(BRIDGE_CAPTION, _CAPTION)]
-    drivers = _drivers_block(pack, BODY_W - _CHART_W - 24)
+    chart_w = _bridge_width(pack)
+    if chart_w > _CHART_W:
+        drivers = _drivers_block(pack)
+        return [Spacer(1, 4), KeepTogether(walk)] + ([Spacer(1, 10), KeepTogether(drivers)]
+                                                     if drivers else [])
+    drivers = _drivers_block(pack, BODY_W - chart_w - 24)
     if not drivers:
         return [KeepTogether(walk)]
-    row = Table([[walk, drivers]], colWidths=[_CHART_W, BODY_W - _CHART_W])
+    row = Table([[walk, drivers]], colWidths=[chart_w, BODY_W - chart_w])
     row.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (1, 0), (1, 0), 18), ("RIGHTPADDING", (1, 0), (1, 0), 6),
@@ -536,18 +558,22 @@ def tile_room(count: int = 4) -> float:
     return BODY_W / count - sum(_TILE_PAD)
 
 
+TILE_MIN_SIZE = 7                # no tile text is printed smaller than this
+
+
 def tile_versus_size(tiles) -> float:
     """
-    The type size for the tiles' comparison lines: 7.5pt, or smaller when the
-    longest would wrap ('CHF 128k (5.5%) above last year', or a yen pack's
-    '¥256.54m (5.5%) above last year'), so every line stays on one line.
+    The type size for the tiles' comparison lines: 7.5pt, or 7pt when the
+    longest would not fit ('CHF 128k (5.5%) above last year'). Never smaller:
+    below 7pt a printed board pack is hard to read. A line that does not fit
+    at 7pt wraps to two lines; the tiles are cells of one table row, so all
+    four grow to the same height.
     """
     lines = [text for t in tiles for text in (t.budget, t.last_year)]
     room = tile_room(len(tiles))
-    for size in (7.5, 7, 6.5):
-        if all(stringWidth(text, _TILE_VERSUS.fontName, size) <= room for text in lines):
-            return size
-    return 6.5
+    if all(stringWidth(text, _TILE_VERSUS.fontName, 7.5) <= room for text in lines):
+        return 7.5
+    return TILE_MIN_SIZE
 
 
 def _tiles(pack: Pack) -> Table:
