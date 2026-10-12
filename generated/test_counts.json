@@ -1,9 +1,9 @@
 {
   "written_by": "tests/conftest.py, after a full passing run of the suite",
-  "total": 652,
+  "total": 653,
   "by_suite": {
     "engine": 554,
-    "web": 98
+    "web": 99
   },
   "by_area": [
     {
@@ -60,7 +60,7 @@
     },
     {
       "area": "Web app: review stage",
-      "tests": 52
+      "tests": 53
     },
     {
       "area": "Web app: own files and the model",
@@ -87,7 +87,7 @@
     "TestDirectionFlag": 6,
     "TestFit": 21,
     "TestFormatting": 32,
-    "TestFreshModules": 12,
+    "TestFreshModules": 13,
     "TestGlossary": 13,
     "TestGlyphsAndDraftRecord": 10,
     "TestItemKeys": 6,

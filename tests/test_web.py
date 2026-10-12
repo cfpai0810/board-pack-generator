@@ -1236,6 +1236,22 @@ class TestFreshModules:
         assert state == {SESSION_RELEASE: 1, "bp_kept_edits": {
             "exec_summary": "Revenue fell. Two customers moved orders."}}
 
+    def test_home_reloads_an_older_copy_of_this_check(self):
+        """Streamlit Cloud keeps an old fresh.py loaded after a pull; Home must reload it."""
+        import importlib.util
+        import streamlit_app.lib as lib
+        real = sys.modules["streamlit_app.lib.fresh"]
+        spec = importlib.util.spec_from_file_location("streamlit_app.lib.fresh", real.__file__)
+        old = importlib.util.module_from_spec(spec)      # an older copy: no held(), no stamp
+        assert not hasattr(old, "held")
+        sys.modules["streamlit_app.lib.fresh"], lib.fresh = old, old
+        try:
+            at = _app("Home.py").run()
+            assert not at.exception, at.exception
+            assert hasattr(old, "held") and old.LOADED_MTIME_NS == real.LOADED_MTIME_NS
+        finally:
+            sys.modules["streamlit_app.lib.fresh"], lib.fresh = real, real
+
     def test_no_pages_folder_beside_home(self):
         """
         A folder named pages/ beside Home.py lets Streamlit run a page without

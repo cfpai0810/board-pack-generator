@@ -18,9 +18,10 @@
 # equals the new PackStatus.FINAL), so they are discarded, and the
 # reviewer's edits are kept as plain strings.
 #
-# This module imports nothing of the project's and is never purged itself.
-# What must outlive a purge (the lock, the generation, the loaded files'
-# stamp) is kept on the sys module, which outlives every reload.
+# This module imports nothing of the project's and is never purged itself:
+# Home reloads it when its own file changes (LOADED_MTIME_NS), since Streamlit
+# Cloud does not. What must outlive a purge (the lock, the generation, the
+# loaded files' stamp) is kept on the sys module, which outlives every reload.
 # =============================================================================
 
 import importlib
@@ -38,6 +39,7 @@ LOADED_STAMP = "_bp_files_stamp"              # set on config by the check befor
 PURGE_WAIT_SECONDS = 30                       # how long a purge waits for runs under way
 ENGINE = ("config", "src.pipeline")           # imported again inside the purge, whole
 _PROJECT = ("config", "src", "streamlit_app")
+LOADED_MTIME_NS = Path(__file__).stat().st_mtime_ns   # this file, when this copy was loaded
 _VERSION = re.compile(r'^VERSION = "([^"]+)"', re.MULTILINE)
 
 

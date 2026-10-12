@@ -20,7 +20,18 @@ if str(ROOT) not in sys.path:
 
 # Imports nothing of the project's: a release pulled into the running app
 # replaces the old modules before this run imports them (lib/fresh.py).
+import importlib
+import threading
+
 from streamlit_app.lib import fresh
+
+# fresh.py is the release check itself, so it is never purged. Streamlit
+# Cloud does not reload it either when a pull changes it (v1.2.1 met an older
+# copy without held()), and this script is the one file always read afresh: so
+# here, under a lock, the copy in memory is reloaded when its file has changed.
+with sys.__dict__.setdefault("_board_pack_fresh_lock", threading.Lock()):
+    if getattr(fresh, "LOADED_MTIME_NS", None) != Path(fresh.__file__).stat().st_mtime_ns:
+        fresh = importlib.reload(fresh)
 
 # The pages live in views/, not pages/: a folder named pages/ beside this
 # script would let Streamlit run a page without this script (its older

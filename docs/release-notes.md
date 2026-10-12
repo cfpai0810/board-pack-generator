@@ -1,5 +1,13 @@
 # Release notes
 
+## Unreleased (since v1.2.1)
+
+- The live app failed after the v1.2.1 push: Home called `fresh.held()`, but
+  Streamlit Cloud kept the copy of `streamlit_app/lib/fresh.py` loaded from
+  `21c09d9`, which has no `held()`. Home now reloads that file itself when
+  it has changed since it was loaded, under a lock; the check can then purge
+  everything else as designed. For the next tagged release's notes.
+
 ## v1.2.1
 
 **Fixes from the v1.2.0 review**
