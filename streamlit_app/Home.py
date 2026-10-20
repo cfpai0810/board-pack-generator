@@ -60,6 +60,10 @@ def _home_page():
         "A monthly board pack: the figures computed in Python, the commentary drafted "
         "inside them, and the reviewer's sign-off."),
         unsafe_allow_html=True)
+    # The worked example, one click away and needing no key: the Board pack
+    # page opens on it, its first tab.
+    if st.button("See the worked example", key="home_worked_example"):
+        st.switch_page(BOARD_PACK)
     render_key_gate()
 
     st.markdown("#### What it does")

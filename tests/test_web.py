@@ -1472,3 +1472,61 @@ class TestFirstView:
                    and getattr(n.func, "attr", "") == "set_page_config"]
         states = [k.value.value for k in call.keywords if k.arg == "initial_sidebar_state"]
         assert states == ["auto"]
+
+    def test_ux1_the_key_gate_sits_in_a_closed_expander(self):
+        from streamlit_app.lib.errors import KEY_LOOKS_COMPLETE
+        label = "Run it live with your own key (optional)"
+        at = _app("Home.py").run()
+        side = list(at.sidebar.children.values())
+        assert [(type(e).__name__, getattr(e, "label", None)) for e in side] == [
+            ("Expander", label), ("Caption", None)]
+        gate = side[0]
+        assert gate.proto.expanded is False
+        assert [type(e).__name__ for e in gate.children.values()] == [
+            "Caption", "TextInput", "Caption", "Markdown"]
+        assert side[1].value == "Live mode is off. The worked example needs no key."
+        assert "Your API key (optional)" not in _sidebar_text(at)
+
+        gate.text_input(key="byo_api_key").input("not-a-key").run()
+        (gate,) = at.sidebar.expander
+        assert gate.label == label and len(gate.warning) == 1
+        gate.text_input(key="byo_api_key").input(TEST_KEY).run()
+        (gate,) = at.sidebar.expander
+        assert gate.label == label
+        assert [s.value for s in gate.success] == [KEY_LOOKS_COMPLETE]
+        assert list(at.sidebar.children.values())[-1].value == "Live mode is on for this session."
+
+    def test_ux1_the_board_pack_page_shows_the_same_gate(self):
+        at = _app(BOARD).run()
+        (gate,) = at.sidebar.expander
+        assert gate.label == "Run it live with your own key (optional)"
+        assert list(at.sidebar.children.values())[-1].value == (
+            "Live mode is off. The worked example needs no key.")
+
+    def test_ux2_the_button_under_the_banner_opens_the_worked_example(self):
+        at = _app("Home.py").run()
+        main = list(at.main.children.values())
+        banner = next(i for i, e in enumerate(main)
+                      if '<div class="bp-header">' in str(getattr(e, "value", "")))
+        assert main[banner + 1].label == "See the worked example"
+        at.button(key="home_worked_example").click().run()
+        assert not at.exception, at.exception
+        assert any("<h1>Board pack</h1>" in m.value for m in at.markdown)
+        assert [t.label for t in at.tabs] == ["View a worked example", "Run it yourself"]
+        assert any("A signed pack, from draft to sign-off" in m.value
+                   for m in at.tabs[0].markdown)
+        assert at.radio(key="in_commentary").disabled              # no key, and none needed
+
+    def test_ux4_tabular_figures_only_where_numbers_line_up(self):
+        from streamlit_app.lib.theme import inject_css
+        rules = [(re.split(r"\*/|;", selector)[-1].strip(), body)
+                 for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", inject_css())]
+        (glob,) = [i for i, (selector, _) in enumerate(rules) if selector.startswith("html, body")]
+        assert "tnum" not in rules[glob][1]
+        assert "font-feature-settings: normal;" in rules[glob][1]
+        numeric = [i for i, (_, body) in enumerate(rules) if "tnum" in body]
+        assert numeric == [glob + 1]                          # one rule, directly after
+        selectors = [s.strip() for s in rules[glob + 1][0].split(",")]
+        assert selectors[:2] == ["table", "table *"]
+        assert {'[data-testid="stMetricValue"]', ".bp-tile-value", ".bp-tile-versus",
+                ".bp-chart *"} <= set(selectors)

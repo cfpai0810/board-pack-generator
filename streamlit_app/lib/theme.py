@@ -8,7 +8,9 @@
 # materiality only; numbers are never coloured (the P5 restraint).
 #
 # Typography follows the portfolio: Source Serif 4 for headings and Inter for
-# body, UI and data, with tabular figures so numbers align in tables.
+# body, UI and data, with tabular figures only where numbers line up (tables,
+# metrics, the headline tiles and the charts): elsewhere they would draw a
+# hyphen as wide as a digit.
 # =============================================================================
 
 from src.pipeline import DRAFT_HEX, FINAL_HEX, MATERIAL_HEX, RULE_HEX
@@ -37,6 +39,12 @@ def inject_css() -> str:
       html, body, [class*="css"], .stMarkdown, .stText, p, span, div, label,
       input, button, table, td, th, ul, ol, li, strong, em, caption {{
         font-family: {SANS};
+        font-feature-settings: normal;
+      }}
+      /* Tabular figures only where numbers line up: tables, metrics, figures */
+      table, table *, [data-testid="stMetricValue"], [data-testid="stMetricValue"] *,
+      [data-testid="stMetricDelta"], [data-testid="stMetricDelta"] *,
+      .bp-tile-value, .bp-tile-versus, .bp-chart * {{
         font-feature-settings: "tnum" 1;
       }}
       h1, h2, h3, h4 {{

@@ -1,9 +1,9 @@
 {
   "written_by": "tests/conftest.py, after a full passing run of the suite",
-  "total": 697,
+  "total": 701,
   "by_suite": {
     "engine": 586,
-    "web": 111
+    "web": 115
   },
   "by_area": [
     {
@@ -68,7 +68,7 @@
     },
     {
       "area": "Web app: content pages",
-      "tests": 11
+      "tests": 15
     }
   ],
   "by_class": {
@@ -85,7 +85,7 @@
     "TestCurrency": 19,
     "TestCurrencyChoice": 4,
     "TestDirectionFlag": 6,
-    "TestFirstView": 1,
+    "TestFirstView": 5,
     "TestFit": 21,
     "TestFormatting": 32,
     "TestFreshModules": 14,
