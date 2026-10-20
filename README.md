@@ -302,8 +302,8 @@ line records the PDF's file name and SHA-256.
 ## Test suite
 
 701 tests (586 on the engine, 115 on the web app), with no real API calls:
-the model path is tested with fake clients, and the suite blocks every
-network connection.
+the model path is tested with fake clients, and a guard blocks network
+connections during test bodies (imports and shared fixtures are not covered).
 
 ```bash
 pip install -r requirements-dev.txt

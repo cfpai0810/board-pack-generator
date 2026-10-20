@@ -1,8 +1,10 @@
-"""Suite-wide guard: no test may open a network connection.
+"""Suite-wide guard: no test body may open a network connection.
 
-The model path is tested only with fake clients. If anything in the suite
-tried to reach the network (a real SDK client, a stray request), the
-connection attempt fails loudly instead of quietly calling an API.
+The model path is tested only with fake clients. If a test body tried to
+reach the network (a real SDK client, a stray request), the connection
+attempt fails loudly instead of quietly calling an API. The guard is a
+fixture that runs around each test body, so it does not cover imports or
+shared fixtures (module scoped), which run before it.
 
 The test counts: after a full, passing run of the whole suite, the number
 of tests by area is written to generated/test_counts.json, which the "How
@@ -55,6 +57,7 @@ AREA_OF = {cls: area for area, classes in AREAS.items() for cls in classes}
 _deselected: list = []
 
 
+# Around each test body only: imports and shared fixtures run before it.
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
     def refuse(*args, **kwargs):
