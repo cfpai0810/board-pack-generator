@@ -56,7 +56,7 @@ from src.state import (
     DRAFT_TEXT, GLYPH, NUMERIC, REVIEWER_TEXT, SECTION_TITLES, Category, Flag, Pack,
     PackStatus, SectionType,
 )
-from src.step1_load import KPI_COLUMNS, PNL_COLUMNS, MissingColumns, file_sha256, load
+from src.step1_load import KPI_COLUMNS, PNL_COLUMNS, MissingColumns, NotText, file_sha256, load
 from src.step2_validate import validate
 from src.step3_compute import compute
 from src.step4_assemble import CASH_REVENUE_MULTIPLE, assemble
@@ -294,7 +294,7 @@ def _build(pnl_path, kpis_path, *, client, materiality_abs, materiality_pct, ent
 
     try:
         loaded = load(Path(pnl_path), None if kpis_path is None else Path(kpis_path))
-    except MissingColumns as e:
+    except (MissingColumns, NotText) as e:
         raise PipelineError(str(e)) from e
     except (UnicodeDecodeError, csv.Error) as e:
         raise PipelineError(f"An input file could not be read as CSV text: {e}") from e

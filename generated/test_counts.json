@@ -1,14 +1,14 @@
 {
   "written_by": "tests/conftest.py, after a full passing run of the suite",
-  "total": 682,
+  "total": 697,
   "by_suite": {
-    "engine": 574,
-    "web": 108
+    "engine": 586,
+    "web": 111
   },
   "by_area": [
     {
       "area": "Loading the files",
-      "tests": 21
+      "tests": 33
     },
     {
       "area": "Validation",
@@ -64,11 +64,11 @@
     },
     {
       "area": "Web app: own files and the model",
-      "tests": 44
+      "tests": 46
     },
     {
       "area": "Web app: content pages",
-      "tests": 10
+      "tests": 11
     }
   ],
   "by_class": {
@@ -85,6 +85,7 @@
     "TestCurrency": 19,
     "TestCurrencyChoice": 4,
     "TestDirectionFlag": 6,
+    "TestFirstView": 1,
     "TestFit": 21,
     "TestFormatting": 32,
     "TestFreshModules": 14,
@@ -103,7 +104,7 @@
     "TestNegativeCash": 3,
     "TestNumericCheck": 13,
     "TestOwnData": 41,
-    "TestOwnFiles": 17,
+    "TestOwnFiles": 19,
     "TestPackLayout": 5,
     "TestPagesLoad": 6,
     "TestPipelineSurface": 18,
@@ -118,6 +119,7 @@
     "TestStory": 9,
     "TestTableFormatting": 18,
     "TestTestCounts": 3,
+    "TestTextEncodings": 12,
     "TestUploadHandling": 7,
     "TestValidate": 15,
     "TestWebLayerBoundary": 7,

@@ -24,7 +24,7 @@ SUITES = {"test_pipeline.py": "engine", "test_web.py": "web"}
 
 # Each test class, by the area of the tool it pins, in the order the page lists them.
 AREAS = {
-    "Loading the files": ["TestLoad"],
+    "Loading the files": ["TestLoad", "TestTextEncodings"],
     "Validation": ["TestValidate"],
     "Computation": ["TestCompute"],
     "Materiality and placement": ["TestAssemble", "TestItemKeys"],
@@ -48,7 +48,7 @@ AREAS = {
     "Web app: own files and the model": ["TestOwnFiles", "TestChangedInputs", "TestModelChoice",
                                          "TestUploadHandling", "TestCurrencyChoice",
                                          "TestKeyGate"],
-    "Web app: content pages": ["TestContentPages", "TestWorkedExampleTab"],
+    "Web app: content pages": ["TestContentPages", "TestWorkedExampleTab", "TestFirstView"],
 }
 AREA_OF = {cls: area for area, classes in AREAS.items() for cls in classes}
 

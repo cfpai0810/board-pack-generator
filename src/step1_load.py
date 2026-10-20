@@ -17,12 +17,19 @@ worse than one with an unnamed line. The loader labels it (for example
 "Unnamed COGS line"), sets line_item_blank, and adds no note; step2 warns.
 
 Single-period contract: one month per file, no period column.
+
+A file is read as UTF-8 (with or without a byte order mark), or else as
+Windows-1252, the encoding Excel's plain "CSV" uses on a UK machine, where
+"£" is one byte. A file that is neither, or is plainly not text, raises
+NotText with a plain message. Either way the audit's SHA-256 is of the raw
+bytes, as uploaded.
 """
 
 from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import re
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -77,6 +84,29 @@ def _parse_amount(raw: str | None) -> Decimal:
 
 class MissingColumns(ValueError):
     """An input file lacks a column the pack needs; the message names it plainly."""
+
+
+NOT_TEXT = "This file could not be read as text. Save it from Excel as CSV UTF-8 and try again."
+
+
+class NotText(ValueError):
+    """An input file that is not text in UTF-8 or Windows-1252; the message says what to do."""
+
+
+def _text(path: Path) -> io.StringIO:
+    """
+    The file's text, ready for the csv module: UTF-8 (a byte order mark
+    allowed), else Windows-1252. NotText when it is neither, or holds a NUL
+    byte, which no CSV saved as text does.
+    """
+    data = Path(path).read_bytes()
+    if b"\x00" not in data:
+        for encoding in ("utf-8-sig", "cp1252"):
+            try:
+                return io.StringIO(data.decode(encoding), newline="")
+            except UnicodeDecodeError:
+                continue
+    raise NotText(NOT_TEXT)
 
 
 PNL_COLUMNS = ("line_item", "category", "actuals", "budget", "prior_year")
@@ -138,7 +168,7 @@ def load_pnl(path: Path) -> tuple[list[PnlLine], list[str], list[SkippedRow]]:
     problems: list[str] = []
     excluded: list[SkippedRow] = []
 
-    with open(path, newline="", encoding="utf-8-sig") as f:
+    with _text(path) as f:
         reader = _reader(f, PNL_COLUMNS, "P&L")
         for i, row in enumerate(reader, start=2):
             if not any(v.strip() for v in row.values() if isinstance(v, str)):
@@ -206,7 +236,7 @@ def load_kpis(path: Path) -> tuple[list[Kpi], list[str]]:
     kpis: list[Kpi] = []
     problems: list[str] = []
 
-    with open(path, newline="", encoding="utf-8-sig") as f:
+    with _text(path) as f:
         reader = _reader(f, KPI_COLUMNS, "KPI")
         for i, row in enumerate(reader, start=2):
             metric = (row.get("metric") or "").strip()

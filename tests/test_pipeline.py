@@ -4346,3 +4346,58 @@ class TestModelFailures:
         for text in (pdf, audit):
             assert not _CLASS_NAME.search(text), _CLASS_NAME.search(text)
             assert type(made).__name__ not in text and "`" not in text
+
+
+# ── CSV FILES IN THE ENCODINGS EXCEL SAVES (item 41) ──────────────────
+
+NOT_TEXT = "This file could not be read as text. Save it from Excel as CSV UTF-8 and try again."
+
+
+def _pound_pnl(encoding: str) -> bytes:
+    """The sample P&L with a "£" in a line name and in an amount, in one encoding."""
+    text = (ROOT / "data" / "pnl.csv").read_text(encoding="utf-8")
+    text = text.replace("Retail,revenue,1643820,", 'Retail (£),revenue,"£1,643,820",')
+    assert "£" in text
+    return text.replace("\n", "\r\n").encode(encoding)
+
+
+class TestTextEncodings:
+    """A UK Excel "CSV" is Windows-1252; "CSV UTF-8" may start with a byte order mark."""
+
+    @pytest.mark.parametrize("encoding", ["cp1252", "utf-8", "utf-8-sig"])
+    def test_item41_a_pound_sign_loads_in_each_encoding(self, tmp_path, encoding):
+        data = _pound_pnl(encoding)
+        if encoding == "cp1252":
+            assert b"\xa3" in data                           # "£" as one byte
+        path = tmp_path / "pnl.csv"
+        path.write_bytes(data)
+        result = _own_run(tmp_path, pnl=path, kpis=None, entity="Test Co", period="June 2026")
+        retail = next(l for l in result.pack.pnl_lines if l.line_item == "Retail (£)")
+        assert retail.actuals == Decimal("1643820")
+        (review_line, _) = _audit_lines(tmp_path / "out")
+        assert review_line["inputs"]["pnl_sha256"] == hashlib.sha256(data).hexdigest()
+
+    def test_item41_a_windows_1252_kpi_file_loads(self, tmp_path):
+        text = (ROOT / "data" / "kpis.csv").read_text(encoding="utf-8")
+        path = tmp_path / "kpis.csv"
+        path.write_bytes((text + "Average order (£),412,400,398\n").encode("cp1252"))
+        result = _own_run(tmp_path, kpis=path)
+        assert "Average order (£)" in [k.metric for k in result.pack.kpis]
+
+    @pytest.mark.parametrize("data", [
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x01\x00",    # an image
+        b"PK\x03\x04\x14\x00\x06\x00\x08\x00\x00\x00!\x00",        # a workbook (.xlsx)
+        "line_item,category\n".encode("utf-16"),                     # UTF-16 text
+        b"line_item,category\n\x81\x8d\x8f\x90\x9d\n",               # neither encoding
+    ])
+    @pytest.mark.parametrize("which", ["pnl", "kpis"])
+    def test_item41_a_file_that_is_not_text_gets_the_plain_message(self, tmp_path, data,
+                                                                    which):
+        from src.pipeline import PipelineError
+        path = tmp_path / f"{which}.csv"
+        path.write_bytes(data)
+        with pytest.raises(PipelineError) as raised:
+            _own_run(tmp_path, **{which: path})
+        assert str(raised.value) == NOT_TEXT
+        assert "codec" not in str(raised.value) and "0x" not in str(raised.value)
+        assert not (tmp_path / "out").exists()                    # nothing written

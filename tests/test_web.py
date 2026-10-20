@@ -638,6 +638,17 @@ class TestOwnFiles:
         at = _own(_app(BOARD).run(), build=False)
         assert "Harmwell" not in _markdown(at)
 
+    def test_item41_a_windows_1252_upload_builds(self):
+        text = SAMPLE_PNL.decode("utf-8").replace("Retail,", "Retail (£),", 1)
+        at = _own(_app(BOARD).run(), pnl=text.encode("cp1252"))
+        assert not at.error, [e.value for e in at.error]
+        assert "Retail (£)" in [l.line_item for l in at.session_state["bp_pack"].pnl_lines]
+
+    def test_item41_a_binary_upload_gets_the_plain_message(self):
+        at = _own(_app(BOARD).run(), pnl=b"PK\x03\x04\x14\x00\x06\x00\x08\x00\x00\x00")
+        assert [e.value for e in at.error] == [
+            "This file could not be read as text. Save it from Excel as CSV UTF-8 and try again."]
+
 
 class TestChangedInputs:
     def test_changed_inputs_need_a_new_draft(self):
@@ -1449,3 +1460,15 @@ class TestKeyGate:
                 "build the pack, a copy is written to your session's own temporary folder on "
                 "the server, and that copy is deleted as soon as the build ends.") in text
         assert "read once" not in text and "without being kept" not in text
+
+
+# ── ON ARRIVAL: THE SIDEBAR (item 53) ─────────────────────────────────
+
+class TestFirstView:
+    def test_item53_the_sidebar_follows_the_screen_on_arrival(self):
+        # "auto": closed on a phone, open on a wide screen (Streamlit decides by width)
+        tree = ast.parse((APP / "Home.py").read_text(encoding="utf-8"))
+        (call,) = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                   and getattr(n.func, "attr", "") == "set_page_config"]
+        states = [k.value.value for k in call.keywords if k.arg == "initial_sidebar_state"]
+        assert states == ["auto"]
