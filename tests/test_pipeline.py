@@ -1481,8 +1481,9 @@ class TestNarrateModel:
     def test_raising_client_falls_back_with_a_warning(self):
         p = self._run(FakeClient(error=ConnectionError("offline")))
         assert [s.drafted_by for s in p.sections] == ["template"] * 4
-        assert p.warnings == ["Commentary: the model call failed (ConnectionError), so "
-                              "the template drafted every section."]
+        assert p.warnings == ["Commentary: The model call did not complete. Please try "
+                              "again, and report it if it keeps happening. The template "
+                              "drafted every section. Code: unknown_error."]
         assert p.narrative_model == ""
 
     def test_malformed_json_falls_back_with_a_warning(self):
@@ -3123,8 +3124,8 @@ class TestOwnData:
         result = _own_run(tmp_path, client=FakeClient(error=RuntimeError("down")))
         assert commentary_source(result.pack) == "Template"
         assert result.narrate_notices == [
-            "Commentary: the model call failed (RuntimeError), so the template drafted "
-            "every section."]
+            "Commentary: The model call did not complete. Please try again, and report it "
+            "if it keeps happening. The template drafted every section. Code: unknown_error."]
         assert result.narrate_notices[0] not in result.data_notes
 
     def test_the_model_sees_the_runs_entity_and_period(self, tmp_path):
@@ -4245,3 +4246,103 @@ class TestPublishedCommands:
         help_text = _cli_subprocess("--help").stdout.decode("utf-8")
         assert "{thousands,units}" in help_text and "pounds" not in help_text
         assert "POUNDS" not in help_text and _retired(help_text) == []
+
+
+# ── A FAILED MODEL CALL: A PLAIN MESSAGE AND A SHORT CODE (items 17 and 55) ──
+
+# (the SDK's error class, its HTTP status or None, the code it maps to)
+SDK_FAILURES = [
+    ("AuthenticationError", 401, "key_rejected"),
+    ("PermissionDeniedError", 403, "key_forbidden"),
+    ("NotFoundError", 404, "model_not_found"),
+    ("BadRequestError", 400, "bad_request"),
+    ("UnprocessableEntityError", 422, "bad_request"),
+    ("RateLimitError", 429, "rate_limited"),
+    ("InternalServerError", 500, "service_unavailable"),
+    ("OverloadedError", 529, "service_unavailable"),
+    ("APIConnectionError", None, "service_unavailable"),
+    ("APITimeoutError", None, "service_unavailable"),
+]
+_CLASS_NAME = re.compile(r"\b[A-Z][A-Za-z]*(Error|Exception)\b")
+
+
+def _sdk_error(name: str, status):
+    """A stand-in for one of the SDK's own errors, built offline from an httpx response."""
+    import anthropic
+    import httpx
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    cls = getattr(anthropic, name)
+    if status is None:
+        return cls(request=request)
+    return cls(f"Error code: {status}", response=httpx.Response(status, request=request),
+               body=None)
+
+
+class TestModelFailures:
+    @pytest.mark.parametrize("name, status, code", SDK_FAILURES)
+    def test_item17_each_sdk_error_gives_its_code(self, name, status, code):
+        from src.pipeline import failure_code
+        assert failure_code(_sdk_error(name, status)) == code
+        p = _narrated_sample(client=FakeClient(error=_sdk_error(name, status)))
+        assert [s.drafted_by for s in p.sections] == ["template"] * 4
+        (note,) = p.warnings
+        assert note.endswith(f" The template drafted every section. Code: {code}.")
+        assert name not in note and not _CLASS_NAME.search(note)
+
+    @pytest.mark.parametrize("error", [RuntimeError("down"), ConnectionError("offline"),
+                                       ValueError("odd"), KeyError("x")])
+    def test_item17_any_other_error_is_unknown_error(self, error):
+        from src.pipeline import failure_code
+        assert failure_code(error) is None
+        p = _narrated_sample(client=FakeClient(error=error))
+        assert p.warnings == [
+            "Commentary: The model call did not complete. Please try again, and report it if "
+            "it keeps happening. The template drafted every section. Code: unknown_error."]
+
+    def test_item17_a_wrapped_sdk_error_still_maps(self):
+        from src.pipeline import failure_code
+        try:
+            try:
+                raise _sdk_error("AuthenticationError", 401)
+            except Exception as exc:
+                raise RuntimeError("wrapped") from exc
+        except RuntimeError as wrapped:
+            assert failure_code(wrapped) == "key_rejected"
+
+    def test_item17_one_message_per_code(self):
+        from config import NARRATIVE_MODEL
+        from src.notes import model_failed
+        from src.pipeline import MODEL_FAILURE_MESSAGES, failure_message
+        assert set(MODEL_FAILURE_MESSAGES) == {
+            "key_rejected", "key_forbidden", "model_not_found", "bad_request", "rate_limited",
+            "service_unavailable", "unreadable_reply", "unknown_error"}
+        for code in MODEL_FAILURE_MESSAGES:
+            assert model_failed(code) == (f"Commentary: {failure_message(code)} The template "
+                                          f"drafted every section. Code: {code}.")
+            assert model_failed(code).kind == "model_failed"
+        assert NARRATIVE_MODEL in failure_message("model_not_found")
+        for code in ("bad_request", "model_not_found"):     # a fault to report, not a wait
+            assert "usually temporary" not in failure_message(code)
+        assert model_failed("no_such_code").endswith("Code: unknown_error.")
+
+    def test_item17_the_engine_never_imports_the_sdk_to_map_errors(self):
+        tree = ast.parse((ROOT / "src" / "notes.py").read_text(encoding="utf-8"))
+        imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+        imported |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+        assert not any(m and m.startswith("anthropic") for m in imported)
+
+    @pytest.mark.parametrize("error, code", [
+        (("AuthenticationError", 401), "key_rejected"), (RuntimeError("down"), "unknown_error")])
+    def test_item55_the_pdf_and_audit_of_a_failed_run_name_no_exception(self, tmp_path, error,
+                                                                          code):
+        made = _sdk_error(*error) if isinstance(error, tuple) else error
+        result = _own_run(tmp_path, client=FakeClient(error=made))
+        pdf = _flat(_pdf_pages(result.pdf_path.read_bytes()))
+        audit = result.audit_path.read_text(encoding="utf-8")
+        (review_line, _) = [json.loads(line) for line in audit.splitlines()]
+        assert f"The template drafted every section. Code: {code}." in pdf
+        assert f"Code: {code}." in review_line["warnings"][-1]
+        assert review_line["notes"][-1]["kind"] == "model_failed"
+        for text in (pdf, audit):
+            assert not _CLASS_NAME.search(text), _CLASS_NAME.search(text)
+            assert type(made).__name__ not in text and "`" not in text

@@ -32,7 +32,7 @@ AREAS = {
                               "TestBillions"],
     "Commentary and its checks": ["TestNarrateTemplate", "TestNumericCheck", "TestNarrateModel",
                                   "TestNarrativeSafeguards", "TestDirectionFlag",
-                                  "TestNegativeCash"],
+                                  "TestNegativeCash", "TestModelFailures"],
     "Review, sign-off and audit": ["TestReview", "TestAuditAdditions", "TestCheckText",
                                    "TestGlyphsAndDraftRecord", "TestPipelineSurface"],
     "The PDF": ["TestRender", "TestPackLayout", "TestStory", "TestComputedText"],
@@ -46,7 +46,8 @@ AREAS = {
                               "TestWebLayerBoundary", "TestFreshModules",
                               "TestSignedPackAcrossAnUpdate"],
     "Web app: own files and the model": ["TestOwnFiles", "TestChangedInputs", "TestModelChoice",
-                                         "TestUploadHandling", "TestCurrencyChoice"],
+                                         "TestUploadHandling", "TestCurrencyChoice",
+                                         "TestKeyGate"],
     "Web app: content pages": ["TestContentPages", "TestWorkedExampleTab"],
 }
 AREA_OF = {cls: area for area, classes in AREAS.items() for cls in classes}

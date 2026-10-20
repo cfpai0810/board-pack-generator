@@ -48,7 +48,10 @@ from src.explain import (
 )
 from config import CURRENCY, MATERIALITY_ABS
 from src.formatting import CURRENCIES, Currency, table_value, when_text
-from src.notes import MAX_NAME_LENGTH, count_words, row_handling
+from src.notes import (
+    MAX_NAME_LENGTH, MODEL_FAILURE_MESSAGES, UNKNOWN_ERROR, count_words, failure_code,
+    failure_message, row_handling,
+)
 from src.state import (
     DRAFT_TEXT, GLYPH, NUMERIC, REVIEWER_TEXT, SECTION_TITLES, Category, Flag, Pack,
     PackStatus, SectionType,
@@ -87,6 +90,8 @@ __all__ = [
     # the review stage
     "review_and_save", "signoff_summary", "check_text", "audit_text",
     "is_sign_word", "SIGN_WORD", "NAME_WARNING", "SIGN_WARNING",
+    # a failed model call, in plain words and a short code
+    "failure_code", "failure_message", "MODEL_FAILURE_MESSAGES", "UNKNOWN_ERROR",
     # what a page displays: the PDF's own text, rows and charts
     "headline_sentence", "summary_line", "pnl_message", "headline_tiles", "Tile",
     "excluded_rows_note", "screen_charts", "ScreenChart",

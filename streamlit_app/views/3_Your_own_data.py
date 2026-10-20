@@ -127,9 +127,10 @@ st.markdown(
 
 st.markdown("#### Privacy")
 st.markdown(
-    "Files you upload are written only to your session's own temporary folder on the "
-    "server, read once to build the pack, and then deleted. The pack keeps their SHA-256 "
-    "hashes, so the exact files can be identified later without being kept. The PDFs and "
+    "Files you upload stay in the server's memory until your session ends. To build the "
+    "pack, a copy is written to your session's own temporary folder on the server, and that "
+    "copy is deleted as soon as the build ends. The pack keeps their SHA-256 hashes, so the "
+    "exact files can be identified later. The PDFs and "
     "audit lines your session produces are not kept on purpose: they are deleted when you "
     "build a new draft or start again, and the server's temporary storage is cleared when "
     "the app restarts.")

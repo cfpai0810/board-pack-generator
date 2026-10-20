@@ -1,9 +1,9 @@
 {
   "written_by": "tests/conftest.py, after a full passing run of the suite",
-  "total": 655,
+  "total": 682,
   "by_suite": {
-    "engine": 555,
-    "web": 100
+    "engine": 574,
+    "web": 108
   },
   "by_area": [
     {
@@ -28,7 +28,7 @@
     },
     {
       "area": "Commentary and its checks",
-      "tests": 63
+      "tests": 82
     },
     {
       "area": "Review, sign-off and audit",
@@ -64,7 +64,7 @@
     },
     {
       "area": "Web app: own files and the model",
-      "tests": 36
+      "tests": 44
     },
     {
       "area": "Web app: content pages",
@@ -91,9 +91,11 @@
     "TestGlossary": 13,
     "TestGlyphsAndDraftRecord": 10,
     "TestItemKeys": 6,
+    "TestKeyGate": 8,
     "TestLoad": 21,
     "TestMain": 20,
     "TestModelChoice": 5,
+    "TestModelFailures": 19,
     "TestNamedExclusions": 7,
     "TestNarrateModel": 12,
     "TestNarrateTemplate": 16,

@@ -418,8 +418,8 @@ def _model_drafts(client, facts: dict, pack: Pack) -> tuple[dict[str, str], list
     system, user = build_prompt(facts, pack.entity, pack.period, currency=pack.currency)
     try:
         response = call_model(client, system, user)
-    except Exception as e:  # any failure degrades to the template
-        return {}, [notes.model_failed(type(e).__name__)]
+    except Exception as e:  # any failure degrades to the template, noted by its plain code
+        return {}, [notes.model_failed(notes.failure_code(e) or notes.UNKNOWN_ERROR)]
 
     pack.narrative_model = response.model
     pack.narrative_input_tokens = response.usage.input_tokens

@@ -30,6 +30,8 @@ from __future__ import annotations
 
 from typing import NamedTuple, Optional
 
+from config import NARRATIVE_MODEL
+
 PNL, KPI_FILE, CASH, COMMENTARY = "pnl", "kpis", "cash", "commentary"
 MAX_NAME_LENGTH = 60
 NAMED_ROWS = 3          # the excluded rows named in full; the rest are counted
@@ -273,9 +275,70 @@ def cash_vs_revenue(cash_text: str, revenue_text: str) -> Note:
 
 # -- Commentary: the model path ------------------------------------------------------
 
-def model_failed(error: str) -> Note:
-    return Note(f"Commentary: the model call failed ({error}), so the template drafted "
-                f"every section.", kind="model_failed", file=COMMENTARY)
+# One plain line per kind of failed model call, the same across the series and
+# the same on the screen, in the PDF and in the audit. A short code is recorded
+# in place of an exception's name. The web app reads these through src.pipeline.
+MODEL_FAILURE_MESSAGES = {
+    "key_rejected": "Anthropic did not accept this key. Check that it was copied in "
+                    "full and has not been deleted or expired.",
+    "key_forbidden": "This key is not allowed to use the model. Check the key's "
+                     "permissions in your Anthropic account.",
+    "model_not_found": "The model {model} could not be found. It may have been retired. "
+                       "Please report this on the project's GitHub page.",
+    "bad_request": "Anthropic rejected the request. This is a fault in this app, not in "
+                   "your key. Please report it.",
+    "rate_limited": "Anthropic is limiting requests on this key. Wait a minute and try "
+                    "again, or check your plan limits.",
+    "service_unavailable": "Anthropic could not be reached or is busy. This is usually "
+                           "temporary, so try again in a moment.",
+    "unreadable_reply": "The model replied, but not in the form this app asked for.",
+    "unknown_error": "The model call did not complete. Please try again, and report it "
+                     "if it keeps happening.",
+}
+UNKNOWN_ERROR = "unknown_error"
+
+# The API's error classes, by name, matched only on classes from the anthropic
+# package itself: the engine never imports the SDK, so the CLI runs without it.
+_SDK_ERRORS = (("AuthenticationError", "key_rejected"),
+               ("PermissionDeniedError", "key_forbidden"),
+               ("NotFoundError", "model_not_found"),
+               ("RateLimitError", "rate_limited"))
+
+
+def failure_code(exc: Optional[BaseException]) -> Optional[str]:
+    """
+    The kind of failed model call, or None when exc is not an error from the
+    API. Follows the exception's causes, so an error that other code wrapped
+    still maps.
+    """
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        names = {c.__name__ for c in type(exc).__mro__
+                 if c.__module__.partition(".")[0] == "anthropic"}
+        for name, code in _SDK_ERRORS:
+            if name in names:
+                return code
+        if "APIStatusError" in names:
+            status = getattr(exc, "status_code", 500)
+            return "bad_request" if status < 500 else "service_unavailable"
+        if "APIConnectionError" in names:
+            return "service_unavailable"
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
+def failure_message(code: str) -> str:
+    """The plain line for a failed model call, without its code."""
+    text = MODEL_FAILURE_MESSAGES.get(code, MODEL_FAILURE_MESSAGES[UNKNOWN_ERROR])
+    return text.format(model=NARRATIVE_MODEL)
+
+
+def model_failed(code: str) -> Note:
+    """The note for a failed model call, by its code (failure_code, or UNKNOWN_ERROR)."""
+    code = code if code in MODEL_FAILURE_MESSAGES else UNKNOWN_ERROR
+    return Note(f"Commentary: {failure_message(code)} The template drafted every section. "
+                f"Code: {code}.", kind="model_failed", file=COMMENTARY)
 
 
 def model_declined() -> Note:

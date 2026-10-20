@@ -4,7 +4,8 @@
 # Renders the API key input in the sidebar, holds the key ONLY in this
 # session's state (the server's memory, for this session), and builds a
 # client when one is needed. The key is never written to disk, never
-# logged, and never kept beyond the session.
+# logged, and never kept beyond the session. It is kept under a non-widget
+# key, so a key entered on one page stays in effect on every page.
 #
 # The template is the default and needs no key: a key only makes the model
 # available as an opt-in for drafting the commentary. Honest disclosure: the
@@ -16,7 +17,13 @@
 import streamlit as st
 
 from streamlit_app.lib.claude_client import MODEL_ID, build_client, looks_like_anthropic_key
-from streamlit_app.lib.errors import friendly_message
+from streamlit_app.lib.errors import KEY_LOOKS_COMPLETE, friendly_message
+
+_KEPT = "anthropic_api_key"   # survives page changes; the widget's own state does not
+
+
+def _keep_key():
+    st.session_state[_KEPT] = st.session_state.get("byo_api_key", "")
 
 
 def render_key_gate():
@@ -30,13 +37,19 @@ def render_key_gate():
         f"With your own key, the model (Claude, via the Anthropic API) can draft it instead, as {MODEL_ID}, "
         "inside the same figures and checks.")
 
+    if _KEPT in st.session_state:
+        st.session_state["byo_api_key"] = st.session_state[_KEPT]
     key = st.sidebar.text_input(
         "Anthropic API key",
         type="password",
         placeholder="sk-ant-...",
         key="byo_api_key",
+        on_change=_keep_key,
         help="Held in the server's memory for this session only. Never stored, never logged.",
     )
+    st.sidebar.caption(
+        "Drafting with the model uses your own Anthropic API key and bills your Anthropic "
+        "account a small amount per run. The worked example needs no key.")
     st.sidebar.markdown(
         '<div class="bp-keynote">Your key is held in the server\'s memory for your '
         'session only, used to make the call, and never stored or logged. Only the '
@@ -58,5 +71,5 @@ def render_key_gate():
     except Exception as exc:
         st.sidebar.error(friendly_message(exc))
         return None
-    st.sidebar.success("Key accepted for this session.")
+    st.sidebar.success(KEY_LOOKS_COMPLETE)
     return client

@@ -475,8 +475,9 @@ def _source_inputs() -> None:
                           mime="text/csv", key="in_dl_kpis", on_click="ignore")
     st.markdown(
         '<p class="bp-note">Amounts are written in the currency you choose; '
-        "nothing is converted. Your files are written only to this session's own temporary "
-        "folder on the server, read once to build the pack, then deleted.</p>",
+        "nothing is converted. Your files stay in the server's memory until your session "
+        "ends. The copy written to this session's own temporary folder to build the pack is "
+        "deleted as soon as the build ends.</p>",
         unsafe_allow_html=True)
 
 

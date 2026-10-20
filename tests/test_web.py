@@ -628,8 +628,9 @@ class TestOwnFiles:
         at = _own(_app(BOARD).run(), build=False)
         text = _text(at)
         assert "Amounts are written in the currency you choose; nothing is converted." in text
-        assert ("Your files are written only to this session's own temporary folder on "
-                "the server, read once to build the pack, then deleted." in text)
+        assert ("Your files stay in the server's memory until your session ends. The copy "
+                "written to this session's own temporary folder to build the pack is deleted "
+                "as soon as the build ends." in text)
         assert [d.proto.label for d in _downloads(at)] == [
             "Sample P&L CSV", "Sample KPI CSV"]
 
@@ -725,8 +726,9 @@ class TestModelChoice:
         at.button(key="bp_run").click().run()
         pack = at.session_state["bp_pack"]
         assert {s.drafted_by for s in pack.sections} == {"template"}
-        assert ("Commentary: the model call failed (RuntimeError), so the template drafted "
-                "every section." in " ".join(w.value for w in at.warning))
+        assert ("Commentary: The model call did not complete. Please try again, and report "
+                "it if it keeps happening. The template drafted every section. Code: "
+                "unknown_error." in " ".join(w.value for w in at.warning))
         assert "Commentary drafted by: Template" in _text(at)
 
     def test_removing_the_key_falls_back_to_the_template(self, monkeypatch):
@@ -1338,3 +1340,112 @@ class TestSignedPackAcrossAnUpdate:
         pack.status = Enum("PackStatus", {"DRAFT": "draft", "FINAL": "final"}).FINAL
         with pytest.raises(AlreadySignedOff):
             review_and_save(pack, tmp_path, edits={}, reviewer="Someone Else", sign_word="SIGN")
+
+
+# ── THE KEY GATE ACROSS PAGES, AND WHAT IT SAYS (items 4, 17, 40, 45) ────
+
+TEST_KEY = "sk-ant-api03-" + "x" * 90         # shaped like a key; never sent anywhere
+
+
+def _sidebar_text(at) -> str:
+    """Everything the sidebar says: markdown, captions and alerts."""
+    side = at.sidebar
+    parts = [m.value for m in side.markdown] + [c.value for c in side.caption]
+    parts += [s.value for s in side.success] + [w.value for w in side.warning]
+    parts += [e.value for e in side.error]
+    return " ".join(parts)
+
+
+class TestKeyGate:
+    def _model_run_after(self, at, monkeypatch) -> list:
+        """Draft with the model on the Board pack page; the keys the client was built from."""
+        from streamlit_app.lib import claude_client
+        built = []
+        monkeypatch.setattr(claude_client, "build_client",
+                            lambda key: built.append(key) or FakeClient())
+        radio = at.radio(key="in_commentary")
+        assert not radio.disabled                       # the model option is enabled here
+        radio.set_value("Model").run()
+        at.button(key="bp_run").click().run()
+        assert not at.exception, at.exception
+        assert {s.drafted_by for s in at.session_state["bp_pack"].sections} == {"model"}
+        return built
+
+    def test_item4_a_key_entered_on_home_stays_in_effect_on_board_pack(self, monkeypatch):
+        at = _app("Home.py").run()                 # Home runs every page inside fresh.held()
+        at.sidebar.text_input(key="byo_api_key").input(TEST_KEY).run()
+        assert "fresh_release" in at.session_state            # set inside fresh.held()
+        at.switch_page(BOARD).run()
+        assert not at.exception, at.exception
+        assert at.sidebar.text_input(key="byo_api_key").value == TEST_KEY
+        assert self._model_run_after(at, monkeypatch) == [TEST_KEY]
+
+    def test_item4_the_key_outlives_a_page_without_the_gate(self, monkeypatch):
+        at = _app("Home.py").run()
+        at.sidebar.text_input(key="byo_api_key").input(TEST_KEY).run()
+        at.switch_page("views/4_How_its_built.py").run()       # no key gate on this page
+        at.switch_page(BOARD).run()
+        assert self._model_run_after(at, monkeypatch) == [TEST_KEY]
+
+    def test_item4_a_key_removed_on_board_pack_is_gone_on_home(self):
+        at = _app("Home.py").run()
+        at.sidebar.text_input(key="byo_api_key").input(TEST_KEY).run()
+        at.switch_page(BOARD).run()
+        at.sidebar.text_input(key="byo_api_key").input("").run()
+        assert at.radio(key="in_commentary").disabled
+        at.switch_page("Home.py").run()
+        assert at.sidebar.text_input(key="byo_api_key").value == ""
+
+    def test_item17_the_gate_says_the_key_looks_complete(self):
+        at = _app("Home.py").run()
+        at.sidebar.text_input(key="byo_api_key").input(TEST_KEY).run()
+        assert [s.value for s in at.sidebar.success] == [
+            "Key looks complete. It is checked when you first run the model."]
+        assert "Key accepted" not in _sidebar_text(at)
+
+    def test_item17_a_failed_call_on_screen_names_its_code_not_its_class(self, monkeypatch):
+        import anthropic
+        import httpx
+        from streamlit_app.lib import claude_client
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        error = anthropic.AuthenticationError(
+            "invalid x-api-key", response=httpx.Response(401, request=request), body=None)
+        monkeypatch.setattr(claude_client, "build_client", lambda key: FakeClient(error=error))
+        at = _with_key(_app(BOARD).run())
+        at.radio(key="in_commentary").set_value("Model").run()
+        at.button(key="bp_run").click().run()
+        warnings = " ".join(w.value for w in at.warning)
+        assert ("Commentary: Anthropic did not accept this key. Check that it was copied in "
+                "full and has not been deleted or expired. The template drafted every "
+                "section. Code: key_rejected.") in warnings
+        assert "AuthenticationError" not in _text(at) + _sidebar_text(at)
+
+    def test_item17_friendly_message_uses_the_shared_mapping(self):
+        import anthropic
+        import httpx
+        from src.pipeline import PipelineError
+        from streamlit_app.lib.errors import friendly_message
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        missing = anthropic.NotFoundError("model", response=httpx.Response(404, request=request),
+                                          body=None)
+        assert friendly_message(missing).startswith("The model claude-sonnet-4-6 could not be "
+                                                    "found. It may have been retired.")
+        assert friendly_message(missing).endswith("Code: `model_not_found`")
+        assert friendly_message(RuntimeError("boom")) == (
+            "Something went wrong building the pack. Please try again.")
+        assert friendly_message(PipelineError("The P&L file is empty.")) == (
+            "The P&L file is empty.")
+
+    def test_item45_the_gate_says_who_pays(self):
+        at = _app("Home.py").run()
+        assert ("Drafting with the model uses your own Anthropic API key and bills your "
+                "Anthropic account a small amount per run. The worked example needs no key."
+                in _sidebar_text(at))
+
+    def test_item40_the_privacy_section_says_what_happens_to_uploads(self):
+        at = _page("views/3_Your_own_data.py")
+        text = _everything(at)
+        assert ("Files you upload stay in the server's memory until your session ends. To "
+                "build the pack, a copy is written to your session's own temporary folder on "
+                "the server, and that copy is deleted as soon as the build ends.") in text
+        assert "read once" not in text and "without being kept" not in text

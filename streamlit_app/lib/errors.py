@@ -4,31 +4,29 @@
 # A finance user must never see a Python traceback. Every failure becomes a
 # plain sentence saying what went wrong and what to do. A PipelineError
 # already speaks plainly (a missing file, a P&L with nothing loadable), so
-# its own message is shown as it is.
+# its own message is shown as it is. A failed model call is worded by the
+# engine's one mapping (src/notes.py, through src.pipeline), so the screen,
+# the PDF and the audit give the same message and the same short code.
 # =============================================================================
 
-import anthropic
+from src.pipeline import PipelineError, failure_code, failure_message
 
-from src.pipeline import PipelineError
+KEY_LOOKS_COMPLETE = "Key looks complete. It is checked when you first run the model."
+
+
+def model_failure_message(code: str) -> str:
+    """The plain line for a failed model call, ending with its code."""
+    return f"{failure_message(code)} Code: `{code}`"
 
 
 def friendly_message(exc: BaseException) -> str:
-    """A short plain-language message for an exception. Never a stack trace."""
+    """A short plain-language message for an exception. Never a class name or a stack trace."""
     if isinstance(exc, PipelineError):
         return str(exc)
 
-    if isinstance(exc, anthropic.AuthenticationError):
-        return ("That API key was not accepted. Check you pasted the whole key "
-                "(it starts with sk-ant-) and that it is active in your Anthropic "
-                "console, then try again.")
-    if isinstance(exc, anthropic.RateLimitError):
-        return ("Your account hit a rate limit. Wait a moment and try again. If it "
-                "keeps happening, check your usage limits in the Anthropic console.")
-    if isinstance(exc, anthropic.APIStatusError):
-        return ("The Anthropic API returned an error and could not complete the "
-                "request. This is usually temporary; please try again shortly.")
-    if isinstance(exc, anthropic.APIConnectionError):
-        return "Could not reach the Anthropic API. Check your connection and try again."
+    code = failure_code(exc)
+    if code:
+        return model_failure_message(code)
 
     if exc.__class__.__name__ == "NoKeyError":
         return ("Paste your Anthropic API key in the sidebar to draft the commentary "
