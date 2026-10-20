@@ -3,6 +3,8 @@ reportlab==5.0.0
 
 # The web app (streamlit run streamlit_app/Home.py)
 streamlit==1.60.0
+# Streamlit 1.60 cannot serve images with starlette 1.8 or later
+starlette==1.7.0
 
 # Only for --use-model: the model client, and reading ANTHROPIC_API_KEY from a local .env
 anthropic==0.116.0

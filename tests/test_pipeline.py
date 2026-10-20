@@ -2597,6 +2597,14 @@ class TestMain:
                      if l.strip() and not l.startswith("#") and not l.startswith("-r")]
             assert lines and all("==" in l for l in lines), name
 
+    def test_item1_starlette_pinned_for_streamlit_1_60(self):
+        # Streamlit 1.60 cannot serve images with starlette 1.8 or later (item 1).
+        from importlib.metadata import version
+        assert "starlette==1.7.0" in (ROOT / "requirements.txt").read_text(encoding="utf-8").split()
+        if version("streamlit").startswith("1.60."):
+            major, minor = (int(part) for part in version("starlette").split(".")[:2])
+            assert (major, minor) < (1, 8)
+
 
 # ── SHARED TABLES AND THE LIVE TEXT CHECK ─────────────────────────────
 

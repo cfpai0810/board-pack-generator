@@ -1,8 +1,8 @@
 {
   "written_by": "tests/conftest.py, after a full passing run of the suite",
-  "total": 654,
+  "total": 655,
   "by_suite": {
-    "engine": 554,
+    "engine": 555,
     "web": 100
   },
   "by_area": [
@@ -40,7 +40,7 @@
     },
     {
       "area": "Command line",
-      "tests": 23
+      "tests": 24
     },
     {
       "area": "Your own data and the notes",
@@ -92,7 +92,7 @@
     "TestGlyphsAndDraftRecord": 10,
     "TestItemKeys": 6,
     "TestLoad": 21,
-    "TestMain": 19,
+    "TestMain": 20,
     "TestModelChoice": 5,
     "TestNamedExclusions": 7,
     "TestNarrateModel": 12,

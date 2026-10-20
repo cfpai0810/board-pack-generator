@@ -301,7 +301,7 @@ line records the PDF's file name and SHA-256.
 
 ## Test suite
 
-654 tests (554 on the engine, 100 on the web app), with no real API calls:
+655 tests (555 on the engine, 100 on the web app), with no real API calls:
 the model path is tested with fake clients, and the suite blocks every
 network connection.
 
