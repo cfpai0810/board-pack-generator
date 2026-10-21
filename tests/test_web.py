@@ -403,11 +403,11 @@ class TestWebLayerBoundary:
         source = (APP / "lib" / "claude_client.py").read_text(encoding="utf-8")
         assert "claude-" not in source
 
-    def test_controls_are_ink_not_the_default_red(self):
+    def test_controls_are_navy_not_the_default_red(self):
         import tomllib
-        from streamlit_app.lib.theme import INK
+        from streamlit_app.lib.theme import ACCENT
         theme = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))
-        assert theme["theme"]["primaryColor"] == INK
+        assert theme["theme"]["primaryColor"] == ACCENT
 
     def test_the_hosted_app_matches_what_the_pages_state(self):
         # The server's upload limit is the one page 3 states, and visitors get no

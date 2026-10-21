@@ -1,8 +1,9 @@
-# Streamlit theme: controls in ink, never the default red. Colour is kept for
-# status (the DRAFT and FINAL chips) and materiality only; lib/theme.py holds
-# the palette, and test_web checks this value matches its INK.
+# Streamlit theme: controls in the series navy, never the default red. Colour
+# is kept for status (the DRAFT and FINAL chips) and materiality only;
+# lib/theme.py holds the palette, and test_web checks this value matches its
+# ACCENT.
 [theme]
-primaryColor = "#1E2A2E"
+primaryColor = "#1A3A5C"
 
 # Visitors see the app, not the developer menu or the Deploy button.
 [client]

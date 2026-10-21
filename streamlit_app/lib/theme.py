@@ -16,8 +16,11 @@
 from src.pipeline import DRAFT_HEX, FINAL_HEX, MATERIAL_HEX, RULE_HEX
 
 INK = "#1E2A2E"
-HEADER_BAND = "#272C30"
-HEADER_SUB = "#CDD2D6"
+# The series navy (DARK_BLUE in Projects 1 to 5): the header band and the
+# controls. Text stays in INK.
+ACCENT = "#1A3A5C"
+ACCENT_HOVER = "#122940"          # the navy darkened to 70 per cent: a primary button on hover
+HEADER_SUB = "#AACCEE"            # the subtitle on the navy band, as Projects 1 to 5
 MUTED = "#6A7378"
 RULE = RULE_HEX
 SOFT_RULE = "#D5D9DB"
@@ -56,7 +59,7 @@ def inject_css() -> str:
 
       /* The page header band */
       .bp-header {{
-        background: {HEADER_BAND};
+        background: {ACCENT};
         color: white;
         padding: 22px 26px;
         border-radius: 10px;
@@ -182,21 +185,21 @@ def inject_css() -> str:
       ul.bp-flags {{ margin: 0 0 14px; padding-left: 1.1em; font-size: 0.82rem; color: {INK}; }}
       ul.bp-flags li {{ margin: 2px 0; }}
 
-      /* Controls in ink, not Streamlit's default red: colour is kept for
-         status and materiality only */
+      /* Controls in the series navy, not Streamlit's default red: colour is
+         kept for status and materiality only */
       [data-testid="stBaseButton-primary"] {{
-        background: {INK}; border-color: {INK}; color: white;
+        background: {ACCENT}; border-color: {ACCENT}; color: white;
       }}
       [data-testid="stBaseButton-primary"]:hover {{
-        background: {HEADER_BAND}; border-color: {HEADER_BAND}; color: white;
+        background: {ACCENT_HOVER}; border-color: {ACCENT_HOVER}; color: white;
       }}
       [data-testid="stTab"][aria-selected="true"],
-      [data-testid="stTab"][aria-selected="true"] p {{ color: {INK}; font-weight: 600; }}
-      [data-testid="stTab"]:hover, [data-testid="stTab"]:hover p {{ color: {INK}; }}
+      [data-testid="stTab"][aria-selected="true"] p {{ color: {ACCENT}; font-weight: 600; }}
+      [data-testid="stTab"]:hover, [data-testid="stTab"]:hover p {{ color: {ACCENT}; }}
       [data-testid="stTextInputRootElement"]:focus-within,
-      [data-testid="stTextAreaRootElement"]:focus-within {{ border-color: {INK} !important; }}
+      [data-testid="stTextAreaRootElement"]:focus-within {{ border-color: {ACCENT} !important; }}
       [data-testid="stTab"] .react-aria-SelectionIndicator {{
-        background-color: {INK} !important; border-color: {INK} !important;
+        background-color: {ACCENT} !important; border-color: {ACCENT} !important;
       }}
 
       /* Key disclosure note in the sidebar */
