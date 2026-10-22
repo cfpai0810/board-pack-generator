@@ -9,3 +9,7 @@ starlette==1.7.0
 # Only for --use-model: the model client, and reading ANTHROPIC_API_KEY from a local .env
 anthropic==0.116.0
 python-dotenv==1.2.2
+
+# Pinned past GHSA-6q48-6c7w-9gw2: the bundle before 2026.10.18 trusts
+# compromised emSign intermediates
+certifi==2026.10.19

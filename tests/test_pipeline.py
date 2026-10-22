@@ -2606,6 +2606,11 @@ class TestMain:
             major, minor = (int(part) for part in version("starlette").split(".")[:2])
             assert (major, minor) < (1, 8)
 
+    def test_item22_certifi_has_the_fixed_root_bundle(self):
+        # certifi before 2026.10.18 trusts emSign ECC Root CA G3, whose
+        # intermediates had compromised keys (GHSA-6q48-6c7w-9gw2).
+        assert "certifi==2026.10.19" in (ROOT / "requirements.txt").read_text(encoding="utf-8").split()
+
 
 # ── SHARED TABLES AND THE LIVE TEXT CHECK ─────────────────────────────
 

@@ -1,8 +1,8 @@
 {
   "written_by": "tests/conftest.py, after a full passing run of the suite",
-  "total": 701,
+  "total": 702,
   "by_suite": {
-    "engine": 586,
+    "engine": 587,
     "web": 115
   },
   "by_area": [
@@ -40,7 +40,7 @@
     },
     {
       "area": "Command line",
-      "tests": 24
+      "tests": 25
     },
     {
       "area": "Your own data and the notes",
@@ -94,7 +94,7 @@
     "TestItemKeys": 6,
     "TestKeyGate": 8,
     "TestLoad": 21,
-    "TestMain": 20,
+    "TestMain": 21,
     "TestModelChoice": 5,
     "TestModelFailures": 19,
     "TestNamedExclusions": 7,
